@@ -128,8 +128,7 @@ public final class BlockMesher {
                     random.setSeed(seed);
                     for (RenderType rt : model.getRenderTypes(state, random, data)) {
                         int layer = allTranslucent ? TRANSLUCENT : layerIndex(rt);
-                        VertexConsumer consumer = alpha < 1.0F
-                                ? wrappers[layer].set(builder(layer), 0, 0, 0, alpha) : builder(layer);
+                        VertexConsumer consumer = wrappers[layer].set(builder(layer), 0, 0, 0, alpha);
                         pose.pushPose();
                         pose.translate(pos.getX() - ox, pos.getY() - oy, pos.getZ() - oz);
                         renderer.tesselateBlock(level, model, state, pos, pose, consumer, true, random, seed,
