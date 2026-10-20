@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "#B#",
+    "| |"
+  ],
+  "key": {
+    "#": {
+      "tag": "minecraft:wooden_slabs"
+    },
+    "B": {
+      "item": "minecraft:paper"
+    },
+    "|": {
+      "item": "minecraft:stick"
+    }
+  },
+  "result": {
+    "id": "designandbuild:blueprint_table",
+    "count": 1
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "variants": {
+    "blueprint=false,facing=north,part=main": {
+      "model": "designandbuild:block/blueprint_table_main"
+    },
+    "blueprint=false,facing=north,part=side": {
+      "model": "designandbuild:block/blueprint_table_side"
+    },
+    "blueprint=true,facing=north,part=main": {
+      "model": "designandbuild:block/blueprint_table_main_paper"
+    },
+    "blueprint=true,facing=north,part=side": {
+      "model": "designandbuild:block/blueprint_table_side"
+    },
+    "blueprint=false,facing=east,part=main": {
+      "model": "designandbuild:block/blueprint_table_main",
+      "y": 90
+    },
+    "blueprint=false,facing=east,part=side": {
+      "model": "designandbuild:block/blueprint_table_side",
+      "y": 90
+    },
+    "blueprint=true,facing=east,part=main": {
+      "model": "designandbuild:block/blueprint_table_main_paper",
+      "y": 90
+    },
+    "blueprint=true,facing=east,part=side": {
+      "model": "designandbuild:block/blueprint_table_side",
+      "y": 90
+    },
+    "blueprint=false,facing=south,part=main": {
+      "model": "designandbuild:block/blueprint_table_main",
+      "y": 180
+    },
+    "blueprint=false,facing=south,part=side": {
+      "model": "designandbuild:block/blueprint_table_side",
+      "y": 180
+    },
+    "blueprint=true,facing=south,part=main": {
+      "model": "designandbuild:block/blueprint_table_main_paper",
+      "y": 180
+    },
+    "blueprint=true,facing=south,part=side": {
+      "model": "designandbuild:block/blueprint_table_side",
+      "y": 180
+    },
+    "blueprint=false,facing=west,part=main": {
+      "model": "designandbuild:block/blueprint_table_main",
+      "y": 270
+    },
+    "blueprint=false,facing=west,part=side": {
+      "model": "designandbuild:block/blueprint_table_side",
+      "y": 270
+    },
+    "blueprint=true,facing=west,part=main": {
+      "model": "designandbuild:block/blueprint_table_main_paper",
+      "y": 270
+    },
+    "blueprint=true,facing=west,part=side": {
+      "model": "designandbuild:block/blueprint_table_side",
+      "y": 270
+    }
+  }
+}
