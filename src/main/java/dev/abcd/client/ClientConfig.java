@@ -43,6 +43,8 @@ public final class ClientConfig {
         public Map<String, Boolean> layerBelow = new HashMap<>();
         /** 도면별: 층 표시 "단계 전체"(모든 층)인가. 있으면 layerBelow 보다 우선. */
         public Set<String> layerAll = new HashSet<>();
+        /** 라이브러리 숨김 목록 (한 줄 = tag:축:값 / structure:ID, client.library.HiddenList). */
+        public Set<String> hidden = new java.util.LinkedHashSet<>();
         /** 도면별: 투영을 끈 도면. */
         public Set<String> projectionOff = new HashSet<>();
         public boolean paletteCollapsed = false;
@@ -84,6 +86,7 @@ public final class ClientConfig {
         if (data.recentBlocks == null) data.recentBlocks = new ArrayList<>();
         if (data.layerBelow == null) data.layerBelow = new HashMap<>();
         if (data.layerAll == null) data.layerAll = new HashSet<>();
+        if (data.hidden == null) data.hidden = new java.util.LinkedHashSet<>();
         if (data.projectionOff == null) data.projectionOff = new HashSet<>();
         while (data.palette.size() < 20) data.palette.add("");
         try {
