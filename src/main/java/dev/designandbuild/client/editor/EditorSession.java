@@ -86,6 +86,8 @@ public final class EditorSession {
     public LibraryEntry placing;
     public int placeRotation;
     public boolean placeMirror;
+    /** 구조물 배치 기준: false = 블록 밖에(기본), true = 가리킨 블록 층에 겹쳐 */
+    public boolean placeInto;
 
     // ---- 단면 ----
     public boolean cutActive;

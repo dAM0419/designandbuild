@@ -297,6 +297,9 @@ public final class OptionBar extends UiPart {
         iconButton(Icons.ROTATE_R, () -> false, () -> s.placeRotation = (s.placeRotation + 1) & 3, "designandbuild.place.rotate", "R");
         iconButton(Icons.MIRROR, () -> s.placeMirror, () -> s.placeMirror = !s.placeMirror, "designandbuild.place.mirror", "F");
         sep();
+        iconButton(Icons.ANCHOR_OUT, () -> !s.placeInto, () -> s.placeInto = false, "designandbuild.place.outside", null);
+        iconButton(Icons.ANCHOR_IN, () -> s.placeInto, () -> s.placeInto = true, "designandbuild.place.into", null);
+        sep();
         if (t != null) {
             String mount = Component.translatable("designandbuild.place.mount", Ui.dirName(t.mount)).getString();
             label(mount, Ui.DIM);

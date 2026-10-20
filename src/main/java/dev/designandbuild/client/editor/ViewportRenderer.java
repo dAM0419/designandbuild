@@ -478,6 +478,7 @@ public final class ViewportRenderer {
                         lines.add(Component.literal(name + " · " + (p.shape().rotation() * 90) + "°" + (p.shape().mirror() ? " · ⇋" : "")));
                         if (!p.valid()) lines.add(Component.translatable(p.error()));
                         else if (p.conflicts().length > 0) lines.add(Component.translatable("designandbuild.editor.overwrites", p.conflicts().length));
+                        if (p.valid() && p.replaced() > 0) lines.add(Component.translatable("designandbuild.editor.replaces_floor", p.replaced()));
                         if (p.shape().mount().getAxis().isHorizontal()) lines.add(Component.translatable("designandbuild.editor.rotation_locked"));
                     }
                 }

@@ -334,7 +334,7 @@ public final class ToolLogic {
     }
 
     public record Placement(Transformed shape, int ox, int oy, int oz, @Nullable String error,
-                            long[] pos, BlockState[] states, long[] conflicts, long[] floating) {
+                            long[] pos, BlockState[] states, long[] conflicts, long[] floating, int replaced) {
         public boolean valid() {
             return error == null;
         }
@@ -373,18 +373,21 @@ public final class ToolLogic {
         if (tr.mount().getAxis().isHorizontal() && face.getAxis().isHorizontal()) {
             oy = p.getY() - (tr.sy() - 1) / 2;
             if (face.getAxis() == Direction.Axis.X) {
-                ox = face == Direction.EAST ? p.getX() + 1 : p.getX() - tr.sx();
+                int in = s.placeInto ? 1 : 0;
+                ox = face == Direction.EAST ? p.getX() + 1 - in : p.getX() - tr.sx() + in;
                 oz = p.getZ() - (tr.sz() - 1) / 2;
             } else {
-                oz = face == Direction.SOUTH ? p.getZ() + 1 : p.getZ() - tr.sz();
+                int in = s.placeInto ? 1 : 0;
+                oz = face == Direction.SOUTH ? p.getZ() + 1 - in : p.getZ() - tr.sz() + in;
                 ox = p.getX() - (tr.sx() - 1) / 2;
             }
         } else {
             ox = p.getX() - (tr.sx() - 1) / 2;
             oz = p.getZ() - (tr.sz() - 1) / 2;
-            oy = p.getY() + 1;
+            oy = p.getY() + (s.placeInto ? 0 : 1);
         }
         int n = tr.states().length;
+        int replaced = 0;
         long[] pos = new long[n];
         LongArrayList conflicts = new LongArrayList();
         LongArrayList floating = new LongArrayList();
@@ -400,13 +403,15 @@ public final class ToolLogic {
             if (st.isAir()) continue;
             Resolved r = s.model.resolved(pos[i]);
             if (r != null && r.owner() != 0 && !r.isAir() && r.state() != st) conflicts.add(pos[i]);
+            // 겹쳐 놓기: 기존 바닥·길 설계 칸을 이 구조물이 대체한다
+            if (r != null && r.owner() == 0 && !r.isAir() && r.state() != st) replaced++;
             if (tr.ys()[i] == 0 && tr.mount() == Direction.DOWN) {
                 BlockState below = s.blockAt(x, y - 1, z, false);
                 if (below.isAir() || below.canBeReplaced()) floating.add(BlockPos.asLong(x, y - 1, z));
             }
         }
         if (error == null && outside) error = "designandbuild.msg.outside_area";
-        return new Placement(tr, ox, oy, oz, error, pos, tr.states(), conflicts.toLongArray(), floating.toLongArray());
+        return new Placement(tr, ox, oy, oz, error, pos, tr.states(), conflicts.toLongArray(), floating.toLongArray(), replaced);
     }
 
     private static Transformed lastTransform;
