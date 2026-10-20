@@ -572,6 +572,12 @@ public final class EditorSession {
         if (renderer != null) renderer.markAll();
     }
 
+    /** 오래(약 8초) 떠 있는 알림. */
+    public void toastLong(Component text) {
+        toasts.add(new Toast(text, System.currentTimeMillis() + 5000, 1));
+        while (toasts.size() > 3) toasts.remove(0);
+    }
+
     public void toast(Component text) {
         long now = System.currentTimeMillis();
         if (!toasts.isEmpty()) {

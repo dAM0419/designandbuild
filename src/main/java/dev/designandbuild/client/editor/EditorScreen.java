@@ -111,6 +111,8 @@ public final class EditorScreen extends Screen {
     // ---- 미리보기 캐시 ----
     public final Preview preview = new Preview();
 
+    private boolean shaderWarned;
+
     public EditorScreen(EditorSession session) {
         super(Component.translatable("designandbuild.editor.title"));
         this.s = session;
@@ -154,6 +156,12 @@ public final class EditorScreen extends Screen {
     protected void init() {
         ClientLibrary.refresh();
         layout();
+        if (!shaderWarned) {
+            shaderWarned = true;
+            if (dev.designandbuild.client.projection.ProjectionRenderer.shaderPackInUse()) {
+                s.toastLong(Component.translatable("designandbuild.msg.shader_warning"));
+            }
+        }
     }
 
     @Override

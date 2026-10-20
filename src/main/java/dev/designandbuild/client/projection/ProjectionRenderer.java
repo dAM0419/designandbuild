@@ -302,7 +302,7 @@ public final class ProjectionRenderer {
     private static Boolean irisPresent;
 
     /** Iris 셰이더 팩이 켜져 있는가. 그러면 별도 버퍼가 셰이더 파이프라인과 어긋날 수 있어 대체 경로를 쓴다. */
-    private static boolean shaderPackInUse() {
+    public static boolean shaderPackInUse() {
         try {
             if (irisPresent == null) {
                 irisPresent = net.neoforged.fml.ModList.get().isLoaded("iris")

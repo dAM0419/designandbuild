@@ -236,6 +236,7 @@
   "designandbuild.msg.outside_area": "Outside the design area",
   "designandbuild.msg.pick_material": "Choose a material first",
   "designandbuild.msg.pick_structure": "Pick a structure in the library",
+  "designandbuild.msg.shader_warning": "Shader packs cause graphics glitches (flat shading, broken projection). Turning shaders off is recommended while designing and building",
   "designandbuild.msg.structure_gone": "That structure no longer exists",
   "designandbuild.msg.table_changed": "The blueprint left the table, so the editor closed",
   "designandbuild.msg.too_far": "Too far from the table",
