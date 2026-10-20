@@ -6,6 +6,7 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CandleBlock;
 import net.minecraft.world.level.block.DirtPathBlock;
 import net.minecraft.world.level.block.FarmBlock;
@@ -30,6 +31,10 @@ import java.util.function.BiConsumer;
  *
  * 비교: 설치로 정해지는 값(방향, 축, 위·아래, 반블록 종류, 물 잠김)만 본다.
  * 주변이나 시간에 따라 바뀌는 값(연결 모양, 전원, 열림, 작물 나이 등)은 무시한다.
+ *
+ * 흙 계열 예외:
+ * - 흙과 잔디 블록은 서로 완료로 친다 (잔디는 흙 위로 번지고, 잔디 아래는 흙이다).
+ * - 흙길·경작지(와 흙)는 그 자리 흙 계열 블록을 삽·괭이로 바꿔 만든다. 부수지 않는다 ({@link #convertTool}).
  */
 public final class StateRules {
     private StateRules() {}
@@ -47,6 +52,7 @@ public final class StateRules {
     public static boolean matches(BlockState world, BlockState target) {
         if (world == target) return true;
         if (target.isAir()) return world.isAir();
+        if (soilEquivalent(world.getBlock(), target.getBlock())) return true;
         if (target.getBlock() instanceof LiquidBlock) {
             FluidState wf = world.getFluidState();
             return world.getBlock() == target.getBlock() && wf.isSource();
@@ -73,9 +79,34 @@ public final class StateRules {
         if (world.getBlock() instanceof LiquidBlock && !wf.isSource()) return false; // 흐르는 물은 원천을 치우면 사라진다
         if (!target.isAir()) {
             if (world.getBlock() == target.getBlock()) return false; // 방향만 다름 → 해당 단계에서 고친다
+            if (convertTool(world, target) != HINT_NONE) return false; // 삽·괭이로 바꾼다
             if (world.canBeReplaced()) return false;                  // 풀·물 등은 바로 덮어 놓을 수 있다
         }
         return true;
+    }
+
+    /** 흙 ↔ 잔디 블록: 어느 쪽이 있어도 다른 쪽 목표를 이룬 것으로 본다. */
+    private static boolean soilEquivalent(Block world, Block target) {
+        return (target == Blocks.GRASS_BLOCK && world == Blocks.DIRT) || (target == Blocks.DIRT && world == Blocks.GRASS_BLOCK);
+    }
+
+    /**
+     * 그 자리 블록을 도구로 바꿔 목표를 만들 수 있으면 그 도구 (HINT_SHOVEL / HINT_HOE), 아니면 HINT_NONE.
+     * 바닐라 삽 (흙길): 잔디·흙·거친 흙·회백토·균사체·뿌리 흙. 괭이 (경작지): 잔디·흙·흙길, (흙): 거친 흙·뿌리 흙.
+     */
+    public static int convertTool(BlockState world, BlockState target) {
+        Block w = world.getBlock(), t = target.getBlock();
+        if (t == Blocks.DIRT_PATH) {
+            return w == Blocks.GRASS_BLOCK || w == Blocks.DIRT || w == Blocks.COARSE_DIRT || w == Blocks.PODZOL
+                    || w == Blocks.MYCELIUM || w == Blocks.ROOTED_DIRT ? HINT_SHOVEL : HINT_NONE;
+        }
+        if (t == Blocks.FARMLAND) {
+            return w == Blocks.GRASS_BLOCK || w == Blocks.DIRT || w == Blocks.DIRT_PATH ? HINT_HOE : HINT_NONE;
+        }
+        if (t == Blocks.DIRT || t == Blocks.GRASS_BLOCK) {
+            return w == Blocks.COARSE_DIRT || w == Blocks.ROOTED_DIRT ? HINT_HOE : HINT_NONE;
+        }
+        return HINT_NONE;
     }
 
     /** 철거 대상이 액체 원천이면 "메우기"로 표시한다. */
@@ -124,6 +155,9 @@ public final class StateRules {
         } else if (block instanceof DirtPathBlock) {
             item = Items.DIRT;
             hint = HINT_SHOVEL;
+        } else if (block == Blocks.GRASS_BLOCK) {
+            item = Items.DIRT; // 흙을 놓으면 잔디가 번진다 (흙도 완료로 친다)
+            hint = HINT_NONE;
         } else if (block instanceof SlabBlock && s.getValue(BlockStateProperties.SLAB_TYPE) == SlabType.DOUBLE) {
             count = 2;
         } else if (block instanceof CandleBlock) {

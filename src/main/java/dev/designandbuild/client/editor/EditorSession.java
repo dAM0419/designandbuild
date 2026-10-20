@@ -124,14 +124,16 @@ public final class EditorSession {
         attachListener();
     }
 
+    private final java.util.function.LongConsumer blockListener = pos -> {
+        if (renderer != null) renderer.markBlock(pos);
+    };
+
     private void attachListener() {
-        model.setListener(pos -> {
-            if (renderer != null) renderer.markBlock(pos);
-        });
+        model.addListener(blockListener);
     }
 
     public void dispose() {
-        model.setListener(null);
+        model.removeListener(blockListener);
         if (renderer != null) {
             renderer.close();
             renderer = null;
@@ -302,13 +304,6 @@ public final class EditorSession {
             case X -> Direction.Axis.Z;
             case Z -> Direction.Axis.Y;
         };
-        cutActive = true;
-        resetCutPos();
-    }
-
-    public void setCutAxis(Direction.Axis axis) {
-        if (cutAxis == axis && cutActive) return;
-        cutAxis = axis;
         cutActive = true;
         resetCutPos();
     }
@@ -567,7 +562,7 @@ public final class EditorSession {
 
     /** 서버가 도면 전체를 다시 보냄 (순서가 어긋났을 때). */
     public void replaceModel(BlueprintModel newModel) {
-        model.setListener(null);
+        model.removeListener(blockListener);
         model = newModel;
         attachListener();
         if (selected != 0 && model.structure(selected) == null) selected = 0;
@@ -625,9 +620,5 @@ public final class EditorSession {
 
     public String newStructureName() {
         return Component.translatable("designandbuild.structure.default", model.nextStructureId).getString();
-    }
-
-    public Iterator<Map.Entry<UUID, String>> editorIterator() {
-        return editors.entrySet().iterator();
     }
 }

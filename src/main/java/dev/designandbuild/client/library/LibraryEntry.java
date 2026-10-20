@@ -13,11 +13,4 @@ import java.util.List;
  */
 public record LibraryEntry(String id, String name, List<String> tags, @Nullable Path file, int sizeX, int sizeY,
                            int sizeZ) {
-    public boolean local() {
-        return file != null;
-    }
-
-    public boolean hasTag(String tag) {
-        return tags.contains(tag);
-    }
 }

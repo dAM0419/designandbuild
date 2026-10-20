@@ -222,12 +222,4 @@ public final class PaletteBar extends UiPart {
         cycle(delta > 0 ? -1 : 1);
         return true;
     }
-
-    public boolean isDragging() {
-        return dragFrom >= 0 && dragged;
-    }
-
-    public static int iconSize() {
-        return Icons.PALETTE;
-    }
 }

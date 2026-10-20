@@ -444,9 +444,4 @@ public final class ToolLogic {
         };
     }
 
-    /** 구조물 블록 사본 (이동 미리보기용). */
-    public static Long2ObjectMap<BlockState> structureBlocks(EditorSession s, int id) {
-        var st = s.model.structure(id);
-        return st == null ? new Long2ObjectLinkedOpenHashMap<>() : st.blocks();
-    }
 }

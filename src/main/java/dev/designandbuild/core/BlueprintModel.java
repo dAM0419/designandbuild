@@ -66,7 +66,8 @@ public final class BlueprintModel {
     private final LongOpenHashSet pending = new LongOpenHashSet();
     private long revision;
     @Nullable
-    private LongConsumer listener;
+    /** 칸 변경 알림 (편집창 그림, 투영). 보통 0~2개. */
+    private final java.util.List<LongConsumer> listeners = new java.util.ArrayList<>(2);
 
     private long conflictCacheRevision = -1;
     private final Int2IntOpenHashMap conflictCache = new Int2IntOpenHashMap();
@@ -101,8 +102,12 @@ public final class BlueprintModel {
         return revision;
     }
 
-    public void setListener(@Nullable LongConsumer listener) {
-        this.listener = listener;
+    public void addListener(LongConsumer listener) {
+        if (!listeners.contains(listener)) listeners.add(listener);
+    }
+
+    public void removeListener(LongConsumer listener) {
+        listeners.remove(listener);
     }
 
     public long baseChunk() {
@@ -178,12 +183,6 @@ public final class BlueprintModel {
         return list;
     }
 
-    /** 이 칸을 블록으로 가진 구조물 ID 들 (순서 무관). */
-    public int[] structuresAt(long pos) {
-        IntArrayList l = posIndex.get(pos);
-        return l == null ? new int[0] : l.toIntArray();
-    }
-
     /** 구조물별 덮어쓰기 충돌 칸 수 (덮어쓴 쪽 기준). */
     public int conflictsOf(int structureId) {
         if (conflictCacheRevision != revision) {
@@ -219,36 +218,6 @@ public final class BlueprintModel {
             minCZ = maxCZ = baseZ;
         }
         return new Box(minCX << 4, minY, minCZ << 4, (maxCX << 4) + 15, maxY - 1, (maxCZ << 4) + 15);
-    }
-
-    // ------------------------------------------------------------------
-    // 청크 영역 규칙
-    // ------------------------------------------------------------------
-
-    public boolean canAddChunk(long chunk) {
-        if (chunks.contains(chunk) || chunks.size() >= MAX_CHUNKS) return false;
-        int cx = ChunkPos.getX(chunk), cz = ChunkPos.getZ(chunk);
-        return chunks.contains(ChunkPos.asLong(cx + 1, cz)) || chunks.contains(ChunkPos.asLong(cx - 1, cz))
-                || chunks.contains(ChunkPos.asLong(cx, cz + 1)) || chunks.contains(ChunkPos.asLong(cx, cz - 1));
-    }
-
-    /** 기준 청크가 아니고, 빼도 영역이 하나로 이어져 있으면 제거 가능. */
-    public boolean canRemoveChunk(long chunk) {
-        if (!chunks.contains(chunk) || chunk == baseChunk() || chunks.size() <= 1) return false;
-        LongOpenHashSet seen = new LongOpenHashSet();
-        LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
-        long start = baseChunk();
-        queue.enqueue(start);
-        seen.add(start);
-        while (!queue.isEmpty()) {
-            long c = queue.dequeueLong();
-            int cx = ChunkPos.getX(c), cz = ChunkPos.getZ(c);
-            long[] next = {ChunkPos.asLong(cx + 1, cz), ChunkPos.asLong(cx - 1, cz), ChunkPos.asLong(cx, cz + 1), ChunkPos.asLong(cx, cz - 1)};
-            for (long n : next) {
-                if (n != chunk && chunks.contains(n) && seen.add(n)) queue.enqueue(n);
-            }
-        }
-        return seen.size() == chunks.size() - 1;
     }
 
     /**
@@ -435,7 +404,7 @@ public final class BlueprintModel {
         if (pending.isEmpty()) return;
         LongIterator it = pending.iterator();
         while (it.hasNext()) resolveAt(it.nextLong());
-        if (listener != null) {
+        for (LongConsumer listener : listeners) {
             LongIterator it2 = pending.iterator();
             while (it2.hasNext()) listener.accept(it2.nextLong());
         }

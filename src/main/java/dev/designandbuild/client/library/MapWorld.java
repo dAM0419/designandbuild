@@ -16,20 +16,30 @@ import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.function.LongFunction;
+
 /** 블록 목록만 있는 작은 가상 월드 (썸네일·유령 블록 굽기용). */
 public final class MapWorld implements BlockAndTintGetter {
-    private final Long2ObjectMap<BlockState> blocks;
+    private final LongFunction<BlockState> blocks;
     private final int minY, height;
+    /** 실제 월드의 생물군계 색을 쓴다 (월드 투영). 아니면 평원 색. */
+    private final boolean worldTint;
 
     public MapWorld(Long2ObjectMap<BlockState> blocks, int minY, int height) {
+        this(blocks::get, minY, height, false);
+    }
+
+    /** 조회 함수로 만든다: 없는 칸은 null. */
+    public MapWorld(LongFunction<BlockState> blocks, int minY, int height, boolean worldTint) {
         this.blocks = blocks;
         this.minY = minY;
         this.height = height;
+        this.worldTint = worldTint;
     }
 
     @Override
     public BlockState getBlockState(BlockPos pos) {
-        BlockState s = blocks.get(pos.asLong());
+        BlockState s = blocks.apply(pos.asLong());
         return s == null ? Blocks.AIR.defaultBlockState() : s;
     }
 
@@ -84,6 +94,7 @@ public final class MapWorld implements BlockAndTintGetter {
     public int getBlockTint(BlockPos pos, ColorResolver resolver) {
         var level = Minecraft.getInstance().level;
         if (level == null) return 0xFFFFFF;
+        if (worldTint) return level.getBlockTint(pos, resolver);
         var plains = level.registryAccess().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.PLAINS);
         return resolver.getColor(plains.value(), pos.getX(), pos.getZ());
     }

@@ -346,7 +346,11 @@ public final class EditorScreen extends Screen {
 
     /** 직접조작 미리보기 캐시. */
     public final class Preview {
-        public long key = Long.MIN_VALUE;
+        /** 미리보기를 만든 입력 (같으면 다시 계산하지 않는다). 해시 충돌이 없게 값 목록 자체로 비교한다. */
+        @Nullable
+        private List<Object> key;
+        @Nullable
+        private List<Object> placementKey;
         @Nullable
         public Box region;
         public long[] targets = new long[0];
@@ -370,14 +374,14 @@ public final class EditorScreen extends Screen {
                     region = null;
                     targets = new long[0];
                     closeGhost();
-                    key = Long.MIN_VALUE;
+                    key = null;
                 }
                 return;
             }
-            long k = Objects.hash(h.pos().asLong(), h.face(), s.op, s.shape, s.cylinderAxis, s.anchor, s.sizeX, s.sizeY,
-                    s.sizeZ, s.tag, s.selected, s.lookH, s.lookV, s.face, s.upperHalf, materialKey(), s.model.revision(),
-                    s.cutStamp);
-            if (k == key) return;
+            List<Object> k = java.util.Arrays.asList(h.pos().asLong(), h.face(), s.op, s.shape, s.cylinderAxis, s.anchor,
+                    s.sizeX, s.sizeY, s.sizeZ, s.tag, s.selected, s.lookH, s.lookV, s.face, s.upperHalf, materialKey(),
+                    s.model.revision(), s.cutStamp);
+            if (k.equals(key)) return;
             key = k;
             region = ToolLogic.region(s, h);
             targets = ToolLogic.targets(s, region);
@@ -403,13 +407,20 @@ public final class EditorScreen extends Screen {
             EditorSession.Hit h = hover;
             if (s.tool != EditorSession.Tool.PLACE || s.placing == null || h == null) {
                 placement = null;
+                placementKey = null;
                 return;
             }
             TemplateData t = ClientLibrary.template(s.placing);
             if (t == null) {
                 placement = null;
+                placementKey = null;
                 return;
             }
+            // 커서·회전·기준·도면이 그대로면 다시 계산하지 않는다 (큰 조각은 칸 수만큼 조회가 든다)
+            List<Object> k = java.util.Arrays.asList(t, h.pos().asLong(), h.face(), s.placeRotation, s.placeMirror,
+                    s.placeInto, s.model.revision());
+            if (placement != null && k.equals(placementKey)) return;
+            placementKey = k;
             placement = ToolLogic.placement(s, t, h);
             if (placementShape != placement.shape()) {
                 placementShape = placement.shape();

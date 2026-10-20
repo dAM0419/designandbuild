@@ -63,6 +63,8 @@ public final class ProjectionRenderer {
     private static final double MAX_DISTANCE = 192;
     /** 한 틱에 구울 칸 수 상한 (프레임이 튀지 않게 나눠 굽는다). */
     private static final int BUILD_BUDGET = 3000;
+    /** 삽·괭이로 바꿀 칸 외곽선 (흙색). */
+    private static final int CONVERT_COLOR = 0xF0B07A3C;
 
     private static final class SectionVisual implements AutoCloseable {
         final int ox, oy, oz;
@@ -98,6 +100,8 @@ public final class ProjectionRenderer {
     private static final ByteBufferBuilder QUAD_MEMORY = new ByteBufferBuilder(1 << 16);
     private static final Long2ObjectOpenHashMap<SectionVisual> VISUALS = new Long2ObjectOpenHashMap<>();
     private static final LongArrayList QUEUE = new LongArrayList();
+    /** QUEUE 중복 확인용. */
+    private static final it.unimi.dsi.fastutil.longs.LongOpenHashSet QUEUED = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
     @Nullable
     private static BlockMesher mesher;
     @Nullable
@@ -107,6 +111,7 @@ public final class ProjectionRenderer {
         for (SectionVisual v : VISUALS.values()) v.close();
         VISUALS.clear();
         QUEUE.clear();
+        QUEUED.clear();
         owner = null;
     }
 
@@ -124,52 +129,57 @@ public final class ProjectionRenderer {
             p.allDirty = false;
             p.dirtySections.clear();
             QUEUE.clear();
+            QUEUED.clear();
             // 지금 보이는 구역 + 이미 구운 구역 모두 다시
-            for (long sec : p.sections()) QUEUE.add(sec);
+            for (long sec : p.sections()) enqueue(sec);
             LongIterator it = VISUALS.keySet().iterator();
             while (it.hasNext()) {
                 long sec = it.nextLong();
-                if (p.cellsIn(sec) == null) QUEUE.add(sec);
+                if (p.cellsIn(sec) == null) enqueue(sec);
             }
         } else if (!p.dirtySections.isEmpty()) {
             LongIterator it = p.dirtySections.iterator();
             while (it.hasNext()) {
                 long sec = it.nextLong();
-                if (!QUEUE.contains(sec)) QUEUE.add(sec);
+                // 칸도 그림도 없는 구역(이웃 표시로 들어온 빈 구역)은 건너뛴다
+                if (p.cellsIn(sec) != null || VISUALS.containsKey(sec)) enqueue(sec);
             }
             p.dirtySections.clear();
         }
         int budget = BUILD_BUDGET;
         while (!QUEUE.isEmpty() && budget > 0) {
             long sec = QUEUE.removeLong(QUEUE.size() - 1);
+            QUEUED.remove(sec);
             budget -= buildSection(p, sec);
         }
+    }
+
+    private static void enqueue(long sec) {
+        if (QUEUED.add(sec)) QUEUE.add(sec);
     }
 
     private static int buildSection(Projection p, long sec) {
         SectionVisual old = VISUALS.remove(sec);
         if (old != null) old.close();
-        int[] cells = p.cellsIn(sec);
+        it.unimi.dsi.fastutil.ints.IntArrayList cells = p.cellsIn(sec);
         if (cells == null) return 1;
         int ox = SectionPos.x(sec) << 4, oy = SectionPos.y(sec) << 4, oz = SectionPos.z(sec) << 4;
-        Long2ObjectOpenHashMap<BlockState> ghosts = new Long2ObjectOpenHashMap<>();
         List<BlockPos> ghostList = new ArrayList<>();
         BufferBuilder lines = null, quads = null;
         int work = 0;
-        for (int i : cells) {
+        for (int k = 0; k < cells.size(); k++) {
+            int i = cells.getInt(k);
             if (!p.inView(i)) continue;
             work++;
             long pos = p.pos[i];
             float x = BlockPos.getX(pos) - ox, y = BlockPos.getY(pos) - oy, z = BlockPos.getZ(pos) - oz;
             switch (p.status[i]) {
-                case Projection.PLACE -> {
-                    BlockPos bp = BlockPos.of(pos);
-                    ghosts.put(pos, p.target[i]);
-                    ghostList.add(bp);
-                }
-                case Projection.WRONG -> {
+                case Projection.PLACE -> ghostList.add(BlockPos.of(pos));
+                case Projection.WRONG, Projection.CONVERT -> {
                     if (lines == null) lines = new BufferBuilder(LINE_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
-                    lineBox(lines, x - 0.004F, y - 0.004F, z - 0.004F, x + 1.004F, y + 1.004F, z + 1.004F, Ui.WARN);
+                    // 주황 = 방향 틀림, 흙색 = 삽·괭이로 바꿀 칸
+                    int color = p.status[i] == Projection.CONVERT ? CONVERT_COLOR : Ui.WARN;
+                    lineBox(lines, x - 0.004F, y - 0.004F, z - 0.004F, x + 1.004F, y + 1.004F, z + 1.004F, color);
                 }
                 case Projection.DEMOLISH, Projection.FILL -> {
                     if (quads == null) quads = new BufferBuilder(QUAD_MEMORY, VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
@@ -185,8 +195,9 @@ public final class ProjectionRenderer {
         if (quads != null) v.quads = upload(quads.build());
         if (!ghostList.isEmpty()) {
             if (mesher == null) mesher = new BlockMesher();
-            // 불투명하게 굽는다 (반투명은 합성 단계에서 한 번에)
-            v.ghost = mesher.build(new MapWorld(ghosts, oy - 16, 48), ghostList.iterator(), ox, oy, oz, 1.0F, false);
+            // 불투명하게 굽는다 (반투명은 합성 단계에서 한 번에).
+            // 이웃 구역의 유령도 보이게 투영 전체를 조회한다: 구역 경계에서 맞닿은 면이 지워지고 그늘이 이어진다
+            v.ghost = mesher.build(new MapWorld(p::ghostAt, oy - 16, 48, true), ghostList.iterator(), ox, oy, oz, 1.0F, false);
         }
         if (!v.isEmpty()) VISUALS.put(sec, v);
         return Math.max(1, work);
@@ -279,11 +290,7 @@ public final class ProjectionRenderer {
 
         // 유령 블록: 한 장으로 그려 통째로 반투명하게
         float opacity = Mth.clamp(ClientConfig.get().projectionOpacity, 30, 80) / 100.0F;
-        if (shaderPackInUse()) {
-            drawGhostsPerBlock(visible, view, proj, cam, opacity);
-        } else {
-            drawGhostsComposited(visible, view, proj, cam, opacity);
-        }
+        drawGhostsComposited(visible, view, proj, cam, opacity);
         // 빨간·청색 필터
         drawBuffers(DabRenderTypes.QUADS, visible, view, proj, cam, 1);
         // 외곽선 (방향 틀림)
@@ -301,7 +308,7 @@ public final class ProjectionRenderer {
     @Nullable
     private static Boolean irisPresent;
 
-    /** Iris 셰이더 팩이 켜져 있는가. 그러면 별도 버퍼가 셰이더 파이프라인과 어긋날 수 있어 대체 경로를 쓴다. */
+    /** Iris 셰이더 팩이 켜져 있는가 (비지원 안내용). */
     public static boolean shaderPackInUse() {
         try {
             if (irisPresent == null) {
@@ -317,10 +324,9 @@ public final class ProjectionRenderer {
         }
     }
 
-    private static void drawGhostLayers(List<SectionVisual> visible, Matrix4f view, Matrix4f proj, Vec3 cam,
-                                        @Nullable RenderType forced) {
+    private static void drawGhostLayers(List<SectionVisual> visible, Matrix4f view, Matrix4f proj, Vec3 cam) {
         for (int layer = 0; layer < BlockMesher.LAYER_COUNT; layer++) {
-            RenderType type = forced != null ? forced : BlockMesher.layerType(layer);
+            RenderType type = BlockMesher.layerType(layer);
             boolean begun = false;
             for (SectionVisual v : visible) {
                 if (v.ghost == null || !v.ghost.hasLayer(layer)) continue;
@@ -356,7 +362,7 @@ public final class ProjectionRenderer {
         gt.bindWrite(false);
         RenderSystem.enableDepthTest();
         RenderSystem.depthMask(true);
-        drawGhostLayers(visible, view, proj, cam, null);
+        drawGhostLayers(visible, view, proj, cam);
         GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, prevFbo);
         GlStateManager._viewport(0, 0, main.viewWidth, main.viewHeight);
 
@@ -388,13 +394,6 @@ public final class ProjectionRenderer {
         RenderSystem.depthMask(true);
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
-    }
-
-    /** 대체 경로: 블록별 반투명 (깊이를 쓰지 않음). 흰 틴트는 쓰지 않는다. */
-    private static void drawGhostsPerBlock(List<SectionVisual> visible, Matrix4f view, Matrix4f proj, Vec3 cam, float opacity) {
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, opacity);
-        drawGhostLayers(visible, view, proj, cam, DabRenderTypes.GHOST);
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
     }
 
     // ------------------------------------------------------------------

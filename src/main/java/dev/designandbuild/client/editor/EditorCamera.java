@@ -81,11 +81,6 @@ public final class EditorCamera {
         return new Matrix4f().setOrtho(-hw, hw, -hh, hh, -4000.0F, 4000.0F);
     }
 
-    /** 화면을 향하는 방향 (월드 기준 카메라 앞쪽). */
-    public Vec3 forward() {
-        return Vec3.directionFromRotation(PITCH, yaw());
-    }
-
     /** 화면 좌표(GUI) 의 시선. origin 은 월드 좌표, direction 은 단위 벡터. */
     public Ray ray(double mx, double my) {
         Matrix4f inv = projection().mul(rotationMatrix()).invert();
@@ -138,8 +133,4 @@ public final class EditorCamera {
 
     public record Ray(Vec3 origin, Vec3 dir) {}
 
-    /** 화면 위쪽이 가리키는 수평 방위 (0 = 북, 1 = 동, 2 = 남, 3 = 서) — 나침반·삼면도 회전용. */
-    public float screenUpYawDegrees() {
-        return yaw() + 180.0F;
-    }
 }

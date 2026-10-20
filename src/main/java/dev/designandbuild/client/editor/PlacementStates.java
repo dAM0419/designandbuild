@@ -200,12 +200,6 @@ public final class PlacementStates {
         }
     }
 
-    /** 이웃 지형 칸의 태그 (연결 갱신으로 함께 보낼 때). */
-    @Nullable
-    public static TerrainCell terrainOf(EditorSession s, long pos) {
-        return s.model.terrainAt(pos);
-    }
-
     /** 설계 위에서 블록을 읽는 가짜 LevelAccessor (updateShape 용). */
     @Nullable
     private static LevelAccessor proxy(EditorSession s, Long2ObjectMap<BlockState> overlay) {

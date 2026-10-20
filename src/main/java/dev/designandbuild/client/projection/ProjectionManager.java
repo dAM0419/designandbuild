@@ -76,6 +76,7 @@ public final class ProjectionManager {
         INSTANT.clear();
         subscribed = null;
         active = null;
+        for (Projection p : CACHE.values()) p.detach();
         CACHE.clear();
         ProjectionRenderer.clear();
         layerMaterials = List.of();
@@ -83,8 +84,7 @@ public final class ProjectionManager {
     }
 
     public static void onModelChanged(BlueprintModel m) {
-        // 버전·리비전으로 다음 틱에 다시 계산한다
-        materialsAge = 999;
+        // 버전·리비전으로 다음 틱에 바뀐 칸만 고친다. 재료 목록은 정해진 주기로 다시 센다
     }
 
     public static void onModelReplaced(BlueprintModel m) {
@@ -95,7 +95,10 @@ public final class ProjectionManager {
 
     /** 도면 메뉴에서 층 보기 방식을 바꿨을 때. */
     public static void markAllDirty() {
-        if (active != null) active.allDirty = true;
+        if (active != null) {
+            active.refreshViewMode();
+            active.allDirty = true;
+        }
     }
 
     @Nullable
@@ -163,7 +166,8 @@ public final class ProjectionManager {
             rebuildCooldown = 10;
             materialsAge = 999;
         }
-        p.step(level, p.isReady() ? 25_000 : 200_000);
+        // 전체 칸은 약 1초에 한 바퀴 다시 본다 (주변 칸은 stepNear 가 더 자주)
+        p.step(level, p.isReady() ? Math.max(512, Math.min(25_000, (p.n + 19) / 20)) : 200_000);
         if (tick % 4 == 0) p.stepNear(level, player.blockPosition(), 1);
         int stageBefore = p.currentStage();
         int layerBefore = p.currentLayer();
@@ -178,8 +182,12 @@ public final class ProjectionManager {
         ProjectionRenderer.update(p);
         if (++materialsAge >= 10) {
             materialsAge = 0;
-            layerMaterials = p.materials(true);
-            stageMaterials = p.materials(false);
+            // 지금 보이는 목록 하나만 센다 (펼침 방식을 바꾸면 바로 다시 센다)
+            if (materialsMode == 2) {
+                stageMaterials = p.materials(false);
+            } else {
+                layerMaterials = p.materials(true);
+            }
         }
     }
 
@@ -231,7 +239,10 @@ public final class ProjectionManager {
         while (Keys.LAYER_DOWN.consumeClick()) p.moveLayer(-1, player.getBlockY());
         while (Keys.STAGE_PREV.consumeClick()) p.moveStage(-1);
         while (Keys.STAGE_NEXT.consumeClick()) p.moveStage(1);
-        while (Keys.MATERIALS.consumeClick()) materialsMode = (materialsMode + 1) % 3;
+        while (Keys.MATERIALS.consumeClick()) {
+            materialsMode = (materialsMode + 1) % 3;
+            materialsAge = 999;
+        }
     }
 
     private static void announce(Projection p, Minecraft mc) {

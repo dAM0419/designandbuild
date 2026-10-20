@@ -33,7 +33,7 @@ import java.util.Map;
  * 철거는 위층부터, 나머지는 아래층부터 진행한다. 비교는 클라이언트가 가진 월드 블록으로 조금씩 굴려 가며 한다.
  */
 public final class Projection {
-    public static final byte UNKNOWN = 0, DONE = 1, PLACE = 2, WRONG = 3, DEMOLISH = 4, FILL = 5;
+    public static final byte UNKNOWN = 0, DONE = 1, PLACE = 2, WRONG = 3, DEMOLISH = 4, FILL = 5, CONVERT = 6;
     public static final int STAGE_DEMOLISH = 0, STAGE_FLOOR = 1, STAGE_PATH = 2, STAGE_STRUCTURES = 3;
     public static final int NO_LAYER = Integer.MIN_VALUE;
 
@@ -46,18 +46,59 @@ public final class Projection {
     int[] stage = new int[0];
     byte[] status = new byte[0];
     int n;
-    private Long2ObjectOpenHashMap<int[]> bySection = new Long2ObjectOpenHashMap<>();
-    /** 위치 → 칸 번호 (건설망치 조준용). */
+    private Long2ObjectOpenHashMap<IntArrayList> bySection = new Long2ObjectOpenHashMap<>();
+    /** 위치 → 칸 번호 (건설망치 조준, 유령 블록 이웃 조회). */
     private Long2IntOpenHashMap index = new Long2IntOpenHashMap();
     private long[] sectionKeys = new long[0];
+    private boolean sectionKeysStale;
 
     /** 구역(SectionPos) 안의 칸 번호들. */
-    int[] cellsIn(long section) {
+    IntArrayList cellsIn(long section) {
         return bySection.get(section);
     }
 
     long[] sections() {
+        if (sectionKeysStale) {
+            sectionKeys = bySection.keySet().toLongArray();
+            sectionKeysStale = false;
+        }
         return sectionKeys;
+    }
+
+    /** 이 위치에 지금 보이는 "놓을" 유령 블록 (없으면 null). 유령끼리 맞닿은 면을 지우는 데 쓴다. */
+    @org.jetbrains.annotations.Nullable
+    BlockState ghostAt(long p) {
+        int i = index.get(p);
+        return i >= 0 && status[i] == PLACE && inView(i) ? target[i] : null;
+    }
+
+    // ---- 도면 변경 추적 (증분 반영) ----
+    private final LongOpenHashSet changed = new LongOpenHashSet();
+    private boolean changedOverflow;
+    @org.jetbrains.annotations.Nullable
+    private BlueprintModel listening;
+    private final java.util.function.LongConsumer changeListener = p -> {
+        if (changedOverflow) return;
+        changed.add(p);
+        if (changed.size() > 200_000) {
+            changedOverflow = true;
+            changed.clear();
+        }
+    };
+
+    private void listenTo(BlueprintModel m) {
+        if (listening == m) return;
+        if (listening != null) listening.removeListener(changeListener);
+        m.addListener(changeListener);
+        listening = m;
+        changed.clear();
+        changedOverflow = false;
+    }
+
+    /** 투영을 버릴 때: 도면 변경 알림을 그만 받는다. */
+    void detach() {
+        if (listening != null) listening.removeListener(changeListener);
+        listening = null;
     }
 
     // ---- 단계 ----
@@ -94,18 +135,30 @@ public final class Projection {
 
     Projection(BlueprintModel model) {
         this.model = model;
+        listenTo(model);
+        refreshViewMode();
     }
 
     public boolean onlyLayer() {
-        return viewMode() == dev.designandbuild.core.Stages.LAYER_ONLY;
+        return viewMode == dev.designandbuild.core.Stages.LAYER_ONLY;
     }
 
-    /** 이 도면의 층 표시 방식 (core.Stages.LAYER_ONLY / BELOW / ALL). */
+    private int viewMode;
+
+    /** 이 도면의 층 표시 방식 (core.Stages.LAYER_ONLY / BELOW / ALL). 칸마다 묻는 값이라 설정에서 읽어 둔다. */
     public int viewMode() {
+        return viewMode;
+    }
+
+    /** 설정의 층 표시 방식을 다시 읽는다 (도면 메뉴에서 바꿨을 때). */
+    void refreshViewMode() {
         String id = model.id.toString();
-        if (ClientConfig.get().layerAll.contains(id)) return dev.designandbuild.core.Stages.LAYER_ALL;
-        return Boolean.TRUE.equals(ClientConfig.get().layerBelow.get(id))
-                ? dev.designandbuild.core.Stages.LAYER_BELOW : dev.designandbuild.core.Stages.LAYER_ONLY;
+        if (ClientConfig.get().layerAll.contains(id)) {
+            viewMode = dev.designandbuild.core.Stages.LAYER_ALL;
+        } else {
+            viewMode = Boolean.TRUE.equals(ClientConfig.get().layerBelow.get(id))
+                    ? dev.designandbuild.core.Stages.LAYER_BELOW : dev.designandbuild.core.Stages.LAYER_ONLY;
+        }
     }
 
     /** 층 표시 이름 키 (HUD 용). */
@@ -129,9 +182,27 @@ public final class Projection {
     void replaceModel(BlueprintModel m) {
         model = m;
         builtRevision = Long.MIN_VALUE;
+        listenTo(m);
+        refreshViewMode();
+    }
+
+    /** 바뀐 칸만 고칠 수 있는가: 처음이 아니고, 단계 목록(구조물 순서)이 그대로이고, 바뀐 칸이 많지 않다. */
+    private boolean canPatch() {
+        if (builtRevision == Long.MIN_VALUE || changedOverflow) return false;
+        if (changed.size() > Math.max(4096, n / 4)) return false;
+        List<StructureInstance> ordered = model.orderedStructures();
+        if (ordered.size() != structIds.length) return false;
+        for (int i = 0; i < structIds.length; i++) if (ordered.get(i).id != structIds[i]) return false;
+        return true;
     }
 
     void rebuild(ClientLevel level) {
+        if (canPatch()) {
+            patch(level);
+            return;
+        }
+        changed.clear();
+        changedOverflow = false;
         builtRevision = model.revision();
         int keepStructure = cur >= STAGE_STRUCTURES && cur - STAGE_STRUCTURES < structIds.length
                 ? structIds[cur - STAGE_STRUCTURES] : 0;
@@ -204,11 +275,8 @@ public final class Projection {
         } else {
             firstPassDone = false;
         }
-        bySection = new Long2ObjectOpenHashMap<>(sections.size());
-        for (Long2ObjectMap.Entry<IntArrayList> e : sections.long2ObjectEntrySet()) {
-            bySection.put(e.getLongKey(), e.getValue().toIntArray());
-        }
-        sectionKeys = bySection.keySet().toLongArray();
+        bySection = sections;
+        sectionKeysStale = true;
         recount();
         if (cursor >= n) cursor = 0;
 
@@ -221,6 +289,182 @@ public final class Projection {
         prevComplete = new boolean[stageCount];
         for (int s = 0; s < stageCount; s++) prevComplete[s] = isComplete(s);
         allDirty = true;
+    }
+
+    // ------------------------------------------------------------------
+    // 증분 반영 (다른 사람이 편집 중일 때 전체를 다시 만들지 않는다)
+    // ------------------------------------------------------------------
+
+    private int stageFor(Resolved r, it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap stageOf) {
+        if (r.isAir()) return STAGE_DEMOLISH;
+        if (r.tag() == DesignTag.PATH) return STAGE_PATH;
+        if (r.tag() == DesignTag.STRUCTURE && r.owner() != 0) {
+            int s = stageOf.get(r.owner());
+            if (s >= 0) return s;
+        }
+        return STAGE_FLOOR;
+    }
+
+    private void patch(ClientLevel level) {
+        builtRevision = model.revision();
+        List<StructureInstance> ordered = model.orderedStructures();
+        it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap stageOf = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
+        stageOf.defaultReturnValue(-1);
+        for (int i = 0; i < ordered.size(); i++) {
+            structNames[i] = ordered.get(i).name;
+            stageOf.put(ordered.get(i).id, STAGE_STRUCTURES + i);
+        }
+        it.unimi.dsi.fastutil.longs.LongIterator it = changed.iterator();
+        while (it.hasNext()) {
+            long p = it.nextLong();
+            Resolved r = model.resolved(p);
+            int i = index.get(p);
+            if (r == null) {
+                if (i >= 0) removeCell(i);
+                continue;
+            }
+            int st = stageFor(r, stageOf);
+            if (i < 0) {
+                addCell(level, p, r.state(), st);
+            } else if (target[i] != r.state() || stage[i] != st) {
+                countCell(i, -1);
+                target[i] = r.state();
+                stage[i] = st;
+                status[i] = evaluate(level, i);
+                countCell(i, 1);
+                dirtyAround(p);
+            }
+        }
+        changed.clear();
+    }
+
+    private void addCell(ClientLevel level, long p, BlockState t, int st) {
+        if (n == pos.length) {
+            int cap = Math.max(64, n + (n >> 1));
+            pos = java.util.Arrays.copyOf(pos, cap);
+            target = java.util.Arrays.copyOf(target, cap);
+            stage = java.util.Arrays.copyOf(stage, cap);
+            status = java.util.Arrays.copyOf(status, cap);
+        }
+        int i = n++;
+        pos[i] = p;
+        target[i] = t;
+        stage[i] = st;
+        status[i] = evaluate(level, i);
+        index.put(p, i);
+        long sec = sectionOf(p);
+        IntArrayList l = bySection.get(sec);
+        if (l == null) {
+            l = new IntArrayList();
+            bySection.put(sec, l);
+            sectionKeysStale = true;
+        }
+        l.add(i);
+        countCell(i, 1);
+        dirtyAround(p);
+    }
+
+    /** 칸을 빼고 마지막 칸을 그 자리로 옮긴다. */
+    private void removeCell(int i) {
+        long p = pos[i];
+        countCell(i, -1);
+        dirtyAround(p);
+        long sec = sectionOf(p);
+        IntArrayList l = bySection.get(sec);
+        if (l != null) {
+            l.rem(i);
+            if (l.isEmpty()) {
+                bySection.remove(sec);
+                sectionKeysStale = true;
+            }
+        }
+        index.remove(p);
+        int last = n - 1;
+        if (i != last) {
+            long lp = pos[last];
+            pos[i] = lp;
+            target[i] = target[last];
+            stage[i] = stage[last];
+            status[i] = status[last];
+            index.put(lp, i);
+            IntArrayList ll = bySection.get(sectionOf(lp));
+            if (ll != null) {
+                int k = ll.indexOf(last);
+                if (k >= 0) ll.set(k, i);
+            }
+        }
+        target[last] = null;
+        n--;
+        if (cursor >= n) cursor = 0;
+    }
+
+    /** 칸 하나를 개수에 더하거나(1) 뺀다(-1). {@link #recount} 와 같은 규칙. */
+    private void countCell(int i, int d) {
+        int s = stage[i];
+        int y = BlockPos.getY(pos[i]);
+        byte st = status[i];
+        if (s != STAGE_DEMOLISH) {
+            total[s] += d;
+            if (st == UNKNOWN) {
+                unknownBy[s] += d;
+            } else if (st != DONE) {
+                remaining[s] += d;
+                layerRemaining[s].addTo(y, d);
+                if (layerRemaining[s].get(y) <= 0) layerRemaining[s].remove(y);
+            }
+        }
+        if (st == DEMOLISH || st == FILL) {
+            demolishCount += d;
+            demolishLayer.addTo(y, d);
+            if (demolishLayer.get(y) <= 0) demolishLayer.remove(y);
+        }
+        if (st == UNKNOWN) unknownCount += d;
+    }
+
+    private static long sectionOf(long p) {
+        return SectionPos.asLong(BlockPos.getX(p) >> 4, BlockPos.getY(p) >> 4, BlockPos.getZ(p) >> 4);
+    }
+
+    /** 이 칸의 구역과, 경계면에 닿아 있으면 이웃 구역도 다시 그린다 (유령끼리 맞닿은 면이 바뀌므로). */
+    private void dirtyAround(long p) {
+        int x = BlockPos.getX(p), y = BlockPos.getY(p), z = BlockPos.getZ(p);
+        int sx = x >> 4, sy = y >> 4, sz = z >> 4;
+        dirtySections.add(SectionPos.asLong(sx, sy, sz));
+        int lx = x & 15, ly = y & 15, lz = z & 15;
+        if (lx == 0) dirtySections.add(SectionPos.asLong(sx - 1, sy, sz));
+        if (lx == 15) dirtySections.add(SectionPos.asLong(sx + 1, sy, sz));
+        if (ly == 0) dirtySections.add(SectionPos.asLong(sx, sy - 1, sz));
+        if (ly == 15) dirtySections.add(SectionPos.asLong(sx, sy + 1, sz));
+        if (lz == 0) dirtySections.add(SectionPos.asLong(sx, sy, sz - 1));
+        if (lz == 15) dirtySections.add(SectionPos.asLong(sx, sy, sz + 1));
+    }
+
+    /**
+     * 층만 바뀌었을 때 다시 그릴 구역: 보이는 칸이 달라지는 높이(2칸 블록 때문에 ±1)에 걸친 구역만.
+     * 단계 전체 보기면 층과 무관하므로 없다.
+     */
+    private void dirtyLayerChange(int oldLayer, int newLayer) {
+        if (oldLayer == newLayer) return;
+        if (viewMode == dev.designandbuild.core.Stages.LAYER_ALL) return;
+        if (oldLayer == NO_LAYER || newLayer == NO_LAYER) {
+            allDirty = true;
+            return;
+        }
+        int lo, hi;
+        boolean only = onlyLayer();
+        long[] keys = sections();
+        for (long sec : keys) {
+            int y0 = SectionPos.y(sec) << 4, y1 = y0 + 15;
+            boolean hit;
+            if (only) {
+                hit = (oldLayer + 1 >= y0 && oldLayer - 1 <= y1) || (newLayer + 1 >= y0 && newLayer - 1 <= y1);
+            } else {
+                lo = Math.min(oldLayer, newLayer) - 1;
+                hi = Math.max(oldLayer, newLayer) + 1;
+                hit = hi >= y0 && lo <= y1;
+            }
+            if (hit) dirtySections.add(sec);
+        }
     }
 
     private void recount() {
@@ -267,6 +511,7 @@ public final class Projection {
         if (StateRules.needsDemolish(world, t)) return StateRules.isFillTarget(world) ? FILL : DEMOLISH;
         if (t.isAir()) return DONE;
         if (StateRules.sameBlockWrongState(world, t)) return WRONG;
+        if (StateRules.convertTool(world, t) != StateRules.HINT_NONE) return CONVERT;
         return PLACE;
     }
 
@@ -296,10 +541,7 @@ public final class Projection {
         }
         if (old == UNKNOWN) unknownCount--;
         if (ns == UNKNOWN) unknownCount++;
-        if (s == cur || (cur == STAGE_DEMOLISH && (wasDem || isDem))) {
-            long p = pos[i];
-            dirtySections.add(SectionPos.asLong(BlockPos.getX(p) >> 4, BlockPos.getY(p) >> 4, BlockPos.getZ(p) >> 4));
-        }
+        if (s == cur || (cur == STAGE_DEMOLISH && (wasDem || isDem))) dirtyAround(pos[i]);
     }
 
     /** 칸 일부를 다시 비교한다. */
@@ -331,9 +573,12 @@ public final class Projection {
         for (int dx = -radiusSections; dx <= radiusSections; dx++) {
             for (int dy = -radiusSections; dy <= radiusSections; dy++) {
                 for (int dz = -radiusSections; dz <= radiusSections; dz++) {
-                    int[] cells = bySection.get(SectionPos.asLong(sx + dx, sy + dy, sz + dz));
+                    IntArrayList cells = bySection.get(SectionPos.asLong(sx + dx, sy + dy, sz + dz));
                     if (cells == null) continue;
-                    for (int i : cells) setStatus(i, evaluate(level, i));
+                    for (int k = 0; k < cells.size(); k++) {
+                        int i = cells.getInt(k);
+                        setStatus(i, evaluate(level, i));
+                    }
                 }
             }
         }
@@ -451,8 +696,8 @@ public final class Projection {
             int auto = autoLayer(cur);
             if (auto != curLayer) {
                 if (curLayer != NO_LAYER && prevLayerRemaining > 0 && rem == 0 && auto != NO_LAYER) events |= EVENT_LAYER;
+                dirtyLayerChange(curLayer, auto);
                 curLayer = auto;
-                allDirty = true;
             }
         }
         prevLayerRemaining = layerRemaining(cur, curLayer);
@@ -493,11 +738,12 @@ public final class Projection {
     }
 
     void moveLayer(int d, int playerY) {
+        int before = curLayer;
         if (curLayer == NO_LAYER) curLayer = playerY;
         curLayer += d;
         manualLayer = true;
         prevLayerRemaining = layerRemaining(cur, curLayer);
-        allDirty = true;
+        dirtyLayerChange(before, curLayer);
     }
 
     // ------------------------------------------------------------------
@@ -540,19 +786,30 @@ public final class Projection {
 
     public record Material(Item item, int count, int hint) {}
 
-    /** 현재 단계(구조물 단계는 현재 구조물)에서 남은 재료. layerOnly 면 현재 층만. */
+    /**
+     * 현재 단계(구조물 단계는 현재 구조물)에서 남은 재료. layerOnly 면 현재 층만.
+     * 이미 블록이 있는 칸(방향만 틀림, 삽·괭이로 바꿀 칸)은 재료가 들지 않는다.
+     * 칸마다 환산하지 않고 상태별로 센 뒤 상태마다 한 번 환산한다.
+     */
     List<Material> materials(boolean layerOnly) {
         List<Material> out = new ArrayList<>();
         if (cur <= STAGE_DEMOLISH || cur >= stageCount) return out;
+        it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<BlockState> byState = new it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<>();
+        for (int i = 0; i < n; i++) {
+            if (stage[i] != cur) continue;
+            byte st = status[i];
+            if (st == DONE || st == WRONG || st == CONVERT) continue;
+            if (layerOnly && BlockPos.getY(pos[i]) != curLayer) continue;
+            byState.addTo(target[i], 1);
+        }
         Object2IntLinkedOpenHashMap<Item> counts = new Object2IntLinkedOpenHashMap<>();
         Map<Item, Integer> hints = new HashMap<>();
-        for (int i = 0; i < n; i++) {
-            if (stage[i] != cur || status[i] == DONE) continue;
-            if (layerOnly && BlockPos.getY(pos[i]) != curLayer) continue;
+        for (var e : byState.object2IntEntrySet()) {
+            int times = e.getIntValue();
             Item[] first = new Item[1];
-            int hint = StateRules.requirement(target[i], (item, c) -> {
+            int hint = StateRules.requirement(e.getKey(), (item, c) -> {
                 if (first[0] == null) first[0] = item;
-                counts.addTo(item, c);
+                counts.addTo(item, c * times);
             });
             if (hint != StateRules.HINT_NONE && first[0] != null) hints.put(first[0], hint);
         }
@@ -609,10 +866,6 @@ public final class Projection {
 
     public boolean isReady() {
         return firstPassDone;
-    }
-
-    public int cellCount() {
-        return n;
     }
 
     // ------------------------------------------------------------------

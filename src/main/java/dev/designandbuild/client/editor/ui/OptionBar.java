@@ -386,8 +386,4 @@ public final class OptionBar extends UiPart {
     public int rows() {
         return rows;
     }
-
-    public static int largeThreshold() {
-        return ClientConfig.get().largeOpThreshold;
-    }
 }

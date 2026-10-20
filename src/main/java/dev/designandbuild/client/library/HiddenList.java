@@ -72,20 +72,12 @@ public final class HiddenList {
         return STRUCT + id;
     }
 
-    public static boolean isStructureHidden(LibraryEntry e, Set<String> lines, List<Path> folders) {
-        return !lines.isEmpty() && lines.contains(structureLine(e, folders));
-    }
-
     /** 구조물 자체를 숨겼거나, 숨긴 태그가 하나라도 붙어 있으면 숨김. */
     public static boolean isHidden(LibraryEntry e, Set<String> lines, List<Path> folders) {
         if (lines.isEmpty()) return false;
         if (lines.contains(structureLine(e, folders))) return true;
         for (String t : e.tags()) if (lines.contains(TAG + t)) return true;
         return false;
-    }
-
-    public static boolean isTagHidden(String tag) {
-        return lines().contains(TAG + tag);
     }
 
     public static boolean isHidden(LibraryEntry e) {
