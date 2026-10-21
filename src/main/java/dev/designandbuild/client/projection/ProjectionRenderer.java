@@ -63,8 +63,8 @@ public final class ProjectionRenderer {
     private static final double MAX_DISTANCE = 192;
     /** 한 틱에 구울 칸 수 상한 (프레임이 튀지 않게 나눠 굽는다). */
     private static final int BUILD_BUDGET = 3000;
-    /** 삽·괭이로 바꿀 칸 외곽선 (흙색). */
-    private static final int CONVERT_COLOR = 0xF0B07A3C;
+    /** 도구로 가공할 칸 외곽선 (청록). */
+    private static final int CONVERT_COLOR = 0xF05FD0C0;
 
     private static final class SectionVisual implements AutoCloseable {
         final int ox, oy, oz;
@@ -177,7 +177,7 @@ public final class ProjectionRenderer {
                 case Projection.PLACE -> ghostList.add(BlockPos.of(pos));
                 case Projection.WRONG, Projection.CONVERT -> {
                     if (lines == null) lines = new BufferBuilder(LINE_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
-                    // 주황 = 방향 틀림, 흙색 = 삽·괭이로 바꿀 칸
+                    // 주황 = 방향 틀림, 청록 = 도구로 가공할 칸
                     int color = p.status[i] == Projection.CONVERT ? CONVERT_COLOR : Ui.WARN;
                     lineBox(lines, x - 0.004F, y - 0.004F, z - 0.004F, x + 1.004F, y + 1.004F, z + 1.004F, color);
                 }

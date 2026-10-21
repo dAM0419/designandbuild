@@ -190,7 +190,11 @@ public final class ProjectionHud {
             if (list.isEmpty()) return;
             int rows = Math.min(5, list.size());
             int w = 0;
-            for (int i = 0; i < rows; i++) w = Math.max(w, font.width(String.valueOf(list.get(i).count())));
+            for (int i = 0; i < rows; i++) {
+                Projection.Material m = list.get(i);
+                String c = m.isTool() ? Component.translatable("designandbuild.materials.uses", m.count()).getString() : String.valueOf(m.count());
+                w = Math.max(w, font.width(c));
+            }
             w += 22 + (hasHint(list, rows) ? 12 : 0);
             int h = rows * 18 + (list.size() > rows ? 10 : 0) + 4;
             int x = right - w;
@@ -233,6 +237,10 @@ public final class ProjectionHud {
 
     private static void drawRow(GuiGraphics g, Font font, LocalPlayer player, Projection.Material mat, int x, int y, int w,
                                 boolean withName) {
+        if (mat.isTool()) {
+            drawToolRow(g, font, player, mat, x, y, w, withName);
+            return;
+        }
         ItemStack stack = new ItemStack(mat.item());
         int have = player.getInventory().countItem(mat.item());
         boolean enough = have >= mat.count();
@@ -260,5 +268,31 @@ public final class ProjectionHud {
             Ui.icon(g, icon, 0, 0, Ui.WARN);
             g.pose().popPose();
         }
+    }
+
+    /** 가공 줄: 도구 그림 · "도끼로 가공" · 사용 횟수. 그 도구(꿀벌집은 개수)를 가지고 있으면 초록. */
+    private static void drawToolRow(GuiGraphics g, Font font, LocalPlayer player, Projection.Material mat, int x, int y, int w,
+                                    boolean withName) {
+        boolean ok;
+        if (mat.tool() == StateRules.TOOL_HONEYCOMB) {
+            ok = player.getInventory().countItem(mat.item()) >= mat.count();
+        } else {
+            ok = false;
+            var ability = StateRules.abilityOf(mat.tool());
+            var inv = player.getInventory();
+            for (int i = 0; i < inv.getContainerSize() && !ok; i++) {
+                ItemStack st = inv.getItem(i);
+                if (!st.isEmpty() && ability != null && st.canPerformAction(ability)) ok = true;
+            }
+        }
+        int right = x + w;
+        g.renderItem(new ItemStack(mat.item()), x, y);
+        String count = Component.translatable("designandbuild.materials.uses", mat.count()).getString();
+        int color = ok ? Ui.GOOD : Ui.TEXT;
+        if (withName) {
+            String name = Ui.clip(Component.translatable("designandbuild.materials.tool." + mat.tool()).getString(), w - 18 - 40);
+            Ui.text(g, name, x + 18, y + 4, Ui.ACCENT);
+        }
+        Ui.text(g, count, right - font.width(count), y + 4, color);
     }
 }

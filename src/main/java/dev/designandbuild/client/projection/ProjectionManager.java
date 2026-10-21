@@ -184,9 +184,9 @@ public final class ProjectionManager {
             materialsAge = 0;
             // 지금 보이는 목록 하나만 센다 (펼침 방식을 바꾸면 바로 다시 센다)
             if (materialsMode == 2) {
-                stageMaterials = p.materials(false);
+                stageMaterials = p.materials(level, false);
             } else {
-                layerMaterials = p.materials(true);
+                layerMaterials = p.materials(level, true);
             }
         }
     }

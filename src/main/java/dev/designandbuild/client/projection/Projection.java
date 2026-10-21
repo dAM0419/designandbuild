@@ -508,10 +508,10 @@ public final class Projection {
         BlockState world = level.getBlockState(new BlockPos(x, y, z));
         BlockState t = target[i];
         if (StateRules.matches(world, t)) return DONE;
-        if (StateRules.needsDemolish(world, t)) return StateRules.isFillTarget(world) ? FILL : DEMOLISH;
+        if (StateRules.needsDemolish(level, world, t)) return StateRules.isFillTarget(world) ? FILL : DEMOLISH;
         if (t.isAir()) return DONE;
         if (StateRules.sameBlockWrongState(world, t)) return WRONG;
-        if (StateRules.convertTool(world, t) != StateRules.HINT_NONE) return CONVERT;
+        if (StateRules.conversion(level, world, t) != null) return CONVERT;
         return PLACE;
     }
 
@@ -784,23 +784,40 @@ public final class Projection {
     // 재료
     // ------------------------------------------------------------------
 
-    public record Material(Item item, int count, int hint) {}
+    /**
+     * 재료 목록 한 줄. tool 이 0 이상이면 가공 줄: item 은 도구 그림, count 는 사용 횟수.
+     */
+    public record Material(Item item, int count, int hint, int tool) {
+        public boolean isTool() {
+            return tool >= 0;
+        }
+    }
 
     /**
      * 현재 단계(구조물 단계는 현재 구조물)에서 남은 재료. layerOnly 면 현재 층만.
-     * 이미 블록이 있는 칸(방향만 틀림, 삽·괭이로 바꿀 칸)은 재료가 들지 않는다.
+     * 이미 블록이 있는 칸(방향만 틀림)은 재료가 들지 않는다. 가공할 칸은 재료 대신 도구 줄(사용 횟수)로 센다.
      * 칸마다 환산하지 않고 상태별로 센 뒤 상태마다 한 번 환산한다.
      */
-    List<Material> materials(boolean layerOnly) {
+    List<Material> materials(ClientLevel level, boolean layerOnly) {
         List<Material> out = new ArrayList<>();
         if (cur <= STAGE_DEMOLISH || cur >= stageCount) return out;
         it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<BlockState> byState = new it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<>();
+        int[] toolUses = new int[StateRules.TOOL_COUNT];
+        BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
         for (int i = 0; i < n; i++) {
             if (stage[i] != cur) continue;
             byte st = status[i];
-            if (st == DONE || st == WRONG || st == CONVERT) continue;
+            if (st == DONE || st == WRONG) continue;
             if (layerOnly && BlockPos.getY(pos[i]) != curLayer) continue;
+            if (st == CONVERT) {
+                StateRules.Conversion c = StateRules.conversion(level, level.getBlockState(mp.set(pos[i])), target[i]);
+                if (c != null) for (int t = 0; t < toolUses.length; t++) toolUses[t] += c.uses()[t];
+                continue;
+            }
             byState.addTo(target[i], 1);
+        }
+        for (int t = 0; t < toolUses.length; t++) {
+            if (toolUses[t] > 0) out.add(new Material(StateRules.toolIcon(t), toolUses[t], StateRules.HINT_NONE, t));
         }
         Object2IntLinkedOpenHashMap<Item> counts = new Object2IntLinkedOpenHashMap<>();
         Map<Item, Integer> hints = new HashMap<>();
@@ -815,9 +832,10 @@ public final class Projection {
         }
         for (var e : counts.object2IntEntrySet()) {
             if (e.getKey() == net.minecraft.world.item.Items.AIR) continue;
-            out.add(new Material(e.getKey(), e.getIntValue(), hints.getOrDefault(e.getKey(), StateRules.HINT_NONE)));
+            out.add(new Material(e.getKey(), e.getIntValue(), hints.getOrDefault(e.getKey(), StateRules.HINT_NONE), -1));
         }
-        out.sort((a, b) -> b.count() - a.count());
+        // 도구 줄이 먼저, 그다음 많이 드는 재료 순
+        out.sort((a, b) -> a.isTool() != b.isTool() ? (a.isTool() ? -1 : 1) : b.count() - a.count());
         return out;
     }
 

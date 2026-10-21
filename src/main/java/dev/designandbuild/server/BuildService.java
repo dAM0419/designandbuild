@@ -185,7 +185,7 @@ public final class BuildService {
             BlockState world = level.getBlockState(mp);
             BlockState target = r.state();
             if (demolish) {
-                if (!StateRules.needsDemolish(world, target)) continue;
+                if (!StateRules.needsDemolish(level, world, target)) continue;
                 pos.add(p);
                 next.add(Blocks.AIR.defaultBlockState());
             } else {

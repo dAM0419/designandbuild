@@ -1,6 +1,18 @@
 package dev.designandbuild.core;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.common.DataMapHooks;
+import net.neoforged.neoforge.common.ItemAbilities;
+import net.neoforged.neoforge.common.ItemAbility;
+import org.jetbrains.annotations.Nullable;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
@@ -32,9 +44,10 @@ import java.util.function.BiConsumer;
  * 비교: 설치로 정해지는 값(방향, 축, 위·아래, 반블록 종류, 물 잠김)만 본다.
  * 주변이나 시간에 따라 바뀌는 값(연결 모양, 전원, 열림, 작물 나이 등)은 무시한다.
  *
- * 흙 계열 예외:
+ * 예외:
  * - 흙과 잔디 블록은 서로 완료로 친다 (잔디는 흙 위로 번지고, 잔디 아래는 흙이다).
- * - 흙길·경작지(와 흙)는 그 자리 흙 계열 블록을 삽·괭이로 바꿔 만든다. 부수지 않는다 ({@link #convertTool}).
+ * - 그 자리 블록을 도구로 가공해 목표가 되면 (흙 → 흙길, 원목 → 껍질 벗긴 원목, 녹슨 구리 → 구리 …)
+ *   부수지 않고 "가공"으로 본다 ({@link #conversion}). 철거 단계에는 나오지 않고 그 칸의 단계에서 도구로 바꾼다.
  */
 public final class StateRules {
     private StateRules() {}
@@ -71,15 +84,15 @@ public final class StateRules {
         return !target.isAir() && world.getBlock() == target.getBlock() && !matches(world, target);
     }
 
-    /** 목표를 이루려면 지금 있는 블록을 먼저 부숴야(메워야) 하는가. */
-    public static boolean needsDemolish(BlockState world, BlockState target) {
+    /** 목표를 이루려면 지금 있는 블록을 먼저 부숴야(메워야) 하는가. 가공으로 될 칸은 부수지 않는다. */
+    public static boolean needsDemolish(Level level, BlockState world, BlockState target) {
         if (world.isAir()) return false;
         if (matches(world, target)) return false;
         FluidState wf = world.getFluidState();
         if (world.getBlock() instanceof LiquidBlock && !wf.isSource()) return false; // 흐르는 물은 원천을 치우면 사라진다
         if (!target.isAir()) {
             if (world.getBlock() == target.getBlock()) return false; // 방향만 다름 → 해당 단계에서 고친다
-            if (convertTool(world, target) != HINT_NONE) return false; // 삽·괭이로 바꾼다
+            if (conversion(level, world, target) != null) return false; // 도구로 가공한다
             if (world.canBeReplaced()) return false;                  // 풀·물 등은 바로 덮어 놓을 수 있다
         }
         return true;
@@ -90,23 +103,119 @@ public final class StateRules {
         return (target == Blocks.GRASS_BLOCK && world == Blocks.DIRT) || (target == Blocks.DIRT && world == Blocks.GRASS_BLOCK);
     }
 
+    // ------------------------------------------------------------------
+    // 가공 (도구로 블록을 바꿔 목표를 만든다)
+    // ------------------------------------------------------------------
+
+    /** 가공 도구 종류. 꿀벌집은 도구가 아니라 쓰는 아이템이다 (구리 밀랍 칠). */
+    public static final int TOOL_SHOVEL = 0, TOOL_HOE = 1, TOOL_AXE = 2, TOOL_SHEARS = 3, TOOL_HONEYCOMB = 4, TOOL_COUNT = 5;
+
+    private static final ItemAbility[] ABILITIES = {
+            ItemAbilities.SHOVEL_FLATTEN, ItemAbilities.HOE_TILL, ItemAbilities.AXE_STRIP, ItemAbilities.AXE_SCRAPE,
+            ItemAbilities.AXE_WAX_OFF, ItemAbilities.SHEARS_CARVE};
+    private static final int[] ABILITY_TOOL = {TOOL_SHOVEL, TOOL_HOE, TOOL_AXE, TOOL_AXE, TOOL_AXE, TOOL_SHEARS};
+    /** 연달아 가공하는 최대 횟수 (산화된 구리 → 구리 = 도끼 3회, 밀랍 칠까지 4회). */
+    private static final int MAX_STEPS = 4;
+
+    /** 가공 방법: 도구별 사용 횟수. */
+    public record Conversion(int[] uses) {
+        public int mainTool() {
+            int best = 0;
+            for (int t = 1; t < uses.length; t++) if (uses[t] > uses[best]) best = t;
+            return best;
+        }
+    }
+
+    private record Key(BlockState world, BlockState target) {}
+
+    private static final Conversion NONE_CONVERSION = new Conversion(new int[0]);
+    private static final java.util.concurrent.ConcurrentHashMap<Key, Conversion> CONVERSIONS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static ItemAbility abilityOf(int tool) {
+        return switch (tool) {
+            case TOOL_SHOVEL -> ItemAbilities.SHOVEL_FLATTEN;
+            case TOOL_HOE -> ItemAbilities.HOE_TILL;
+            case TOOL_AXE -> ItemAbilities.AXE_STRIP;
+            case TOOL_SHEARS -> ItemAbilities.SHEARS_CARVE;
+            default -> null;
+        };
+    }
+
+    /** HUD 에 그릴 대표 아이템. */
+    public static Item toolIcon(int tool) {
+        return switch (tool) {
+            case TOOL_SHOVEL -> Items.IRON_SHOVEL;
+            case TOOL_HOE -> Items.IRON_HOE;
+            case TOOL_AXE -> Items.IRON_AXE;
+            case TOOL_SHEARS -> Items.SHEARS;
+            default -> Items.HONEYCOMB;
+        };
+    }
+
     /**
-     * 그 자리 블록을 도구로 바꿔 목표를 만들 수 있으면 그 도구 (HINT_SHOVEL / HINT_HOE), 아니면 HINT_NONE.
-     * 바닐라 삽 (흙길): 잔디·흙·거친 흙·회백토·균사체·뿌리 흙. 괭이 (경작지): 잔디·흙·흙길, (흙): 거친 흙·뿌리 흙.
+     * 지금 블록을 도구로 가공해 목표를 만들 수 있으면 그 방법, 아니면 null. 같은 블록끼리(방향만 다름)는 가공이 아니다.
+     * NeoForge 의 도구 가공 경로(getToolModifiedState, 시뮬레이션)를 쓰므로 다른 모드 블록의 가공도 따라온다.
+     * 위가 비어 있어야 하는 가공(괭이)은 비어 있다고 가정한다 — 위 칸은 철거 단계에서 이미 치워진다.
+     * 결과는 (지금 블록, 목표) 쌍마다 기억한다.
      */
-    public static int convertTool(BlockState world, BlockState target) {
-        Block w = world.getBlock(), t = target.getBlock();
-        if (t == Blocks.DIRT_PATH) {
-            return w == Blocks.GRASS_BLOCK || w == Blocks.DIRT || w == Blocks.COARSE_DIRT || w == Blocks.PODZOL
-                    || w == Blocks.MYCELIUM || w == Blocks.ROOTED_DIRT ? HINT_SHOVEL : HINT_NONE;
+    @Nullable
+    public static Conversion conversion(@Nullable Level level, BlockState world, BlockState target) {
+        if (level == null || target.isAir() || world.isAir() || world.getBlock() == target.getBlock()) return null;
+        Key key = new Key(world, target);
+        Conversion c = CONVERSIONS.get(key);
+        if (c == null) {
+            c = search(level, world, target);
+            if (CONVERSIONS.size() > 50_000) CONVERSIONS.clear();
+            CONVERSIONS.put(key, c == null ? NONE_CONVERSION : c);
         }
-        if (t == Blocks.FARMLAND) {
-            return w == Blocks.GRASS_BLOCK || w == Blocks.DIRT || w == Blocks.DIRT_PATH ? HINT_HOE : HINT_NONE;
+        return c == NONE_CONVERSION ? null : c;
+    }
+
+    /** 너비 우선으로 MAX_STEPS 번까지 가공해 본다. */
+    @Nullable
+    private static Conversion search(Level level, BlockState world, BlockState target) {
+        record Node(BlockState state, int[] uses) {}
+        java.util.ArrayDeque<Node> queue = new java.util.ArrayDeque<>();
+        java.util.Set<BlockState> seen = new java.util.HashSet<>();
+        queue.add(new Node(world, new int[TOOL_COUNT]));
+        seen.add(world);
+        // 월드 밖 높이: 위 칸도 월드 밖이라 "비어 있음"으로 읽히고, 청크를 불러오지 않는다
+        BlockPos at = new BlockPos(0, level.getMaxBuildHeight() + 16, 0);
+        BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(at), Direction.UP, at, false);
+        while (!queue.isEmpty()) {
+            Node n = queue.poll();
+            int depth = 0;
+            for (int u : n.uses) depth += u;
+            if (depth >= MAX_STEPS) continue;
+            for (int k = 0; k <= ABILITIES.length; k++) {
+                BlockState next;
+                int tool;
+                if (k == ABILITIES.length) {
+                    Block waxed = DataMapHooks.getBlockWaxed(n.state.getBlock());
+                    next = waxed == null ? null : waxed.withPropertiesOf(n.state);
+                    tool = TOOL_HONEYCOMB;
+                } else {
+                    tool = ABILITY_TOOL[k];
+                    next = modified(level, n.state, ABILITIES[k], toolIcon(tool), hit);
+                }
+                if (next == null || next == n.state || !seen.add(next)) continue;
+                int[] uses = n.uses.clone();
+                uses[tool]++;
+                if (matches(next, target)) return new Conversion(uses);
+                queue.add(new Node(next, uses));
+            }
         }
-        if (t == Blocks.DIRT || t == Blocks.GRASS_BLOCK) {
-            return w == Blocks.COARSE_DIRT || w == Blocks.ROOTED_DIRT ? HINT_HOE : HINT_NONE;
+        return null;
+    }
+
+    @Nullable
+    private static BlockState modified(Level level, BlockState state, ItemAbility ability, Item tool, BlockHitResult hit) {
+        try {
+            UseOnContext ctx = new UseOnContext(level, null, InteractionHand.MAIN_HAND, new ItemStack(tool), hit) {};
+            return state.getToolModifiedState(ctx, ability, true);
+        } catch (Exception e) {
+            return null; // 다른 모드의 가공 처리가 플레이어 없이 실패해도 무시
         }
-        return HINT_NONE;
     }
 
     /** 철거 대상이 액체 원천이면 "메우기"로 표시한다. */
