@@ -58,14 +58,15 @@ public class BlueprintTableBlock extends HorizontalDirectionalBlock implements E
         }
     }
 
-    private static final VoxelShape TOP = Block.box(0, 12, 0, 16, 16, 16);
+    /** 기울어진 상판(앞 낮음)을 덮는 윗부분 + 바깥쪽 옆 틀. 키는 바깥쪽 방향. */
+    private static final VoxelShape TOP = Block.box(0, 11, 0, 16, 16, 16);
     private static final Map<Direction, VoxelShape> SHAPES = new EnumMap<>(Direction.class);
 
     static {
-        SHAPES.put(Direction.EAST, Shapes.or(TOP, Block.box(13, 0, 1, 15, 12, 3), Block.box(13, 0, 13, 15, 12, 15)));
-        SHAPES.put(Direction.WEST, Shapes.or(TOP, Block.box(1, 0, 1, 3, 12, 3), Block.box(1, 0, 13, 3, 12, 15)));
-        SHAPES.put(Direction.SOUTH, Shapes.or(TOP, Block.box(1, 0, 13, 3, 12, 15), Block.box(13, 0, 13, 15, 12, 15)));
-        SHAPES.put(Direction.NORTH, Shapes.or(TOP, Block.box(1, 0, 1, 3, 12, 3), Block.box(13, 0, 1, 15, 12, 3)));
+        SHAPES.put(Direction.EAST, Shapes.or(TOP, Block.box(11.5, 0, 1, 14.5, 11, 15)));
+        SHAPES.put(Direction.WEST, Shapes.or(TOP, Block.box(1.5, 0, 1, 4.5, 11, 15)));
+        SHAPES.put(Direction.SOUTH, Shapes.or(TOP, Block.box(1, 0, 11.5, 15, 11, 14.5)));
+        SHAPES.put(Direction.NORTH, Shapes.or(TOP, Block.box(1, 0, 1.5, 15, 11, 4.5)));
     }
 
     public BlueprintTableBlock(Properties properties) {
