@@ -65,6 +65,8 @@ public final class ProjectionRenderer {
     private static final int BUILD_BUDGET = 3000;
     /** 도구로 가공할 칸 외곽선 (청록). */
     private static final int CONVERT_COLOR = 0xF05FD0C0;
+    /** 놓을 수 없는 칸 (받침이 생길 수 없는 설계). */
+    private static final int INVALID_COLOR = 0xF0B57CF0;
 
     private static final class SectionVisual implements AutoCloseable {
         final int ox, oy, oz;
@@ -175,6 +177,12 @@ public final class ProjectionRenderer {
             float x = BlockPos.getX(pos) - ox, y = BlockPos.getY(pos) - oy, z = BlockPos.getZ(pos) - oz;
             switch (p.status[i]) {
                 case Projection.PLACE -> ghostList.add(BlockPos.of(pos));
+                case Projection.INVALID -> {
+                    // 놓을 수 없는 칸: 유령 + 보라 외곽선 (받침이 생길 수 없는 설계)
+                    ghostList.add(BlockPos.of(pos));
+                    if (lines == null) lines = new BufferBuilder(LINE_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
+                    lineBox(lines, x - 0.004F, y - 0.004F, z - 0.004F, x + 1.004F, y + 1.004F, z + 1.004F, INVALID_COLOR);
+                }
                 case Projection.WRONG, Projection.CONVERT -> {
                     if (lines == null) lines = new BufferBuilder(LINE_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
                     // 주황 = 방향 틀림, 청록 = 도구로 가공할 칸
@@ -406,7 +414,7 @@ public final class ProjectionRenderer {
 
     private static void drawTargetBox(BlockPos p, Matrix4f view, Matrix4f proj, Vec3 cam) {
         BufferBuilder b = new BufferBuilder(TARGET_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
-        lineBox(b, -0.002F, -0.002F, -0.002F, 1.002F, 1.002F, 1.002F, 0xF0FFFFFF);
+        lineBox(b, -0.002F, -0.002F, -0.002F, 1.002F, 1.002F, 1.002F, ProjectionManager.hammerHint != null ? 0xF0FF5050 : 0xF0FFFFFF);
         MeshData data = b.build();
         if (data == null) return;
         if (targetBuffer == null) targetBuffer = new VertexBuffer(VertexBuffer.Usage.DYNAMIC);

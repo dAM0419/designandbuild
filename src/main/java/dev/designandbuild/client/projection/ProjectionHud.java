@@ -47,6 +47,23 @@ public final class ProjectionHud {
         }
         renderProgress(g, mc, p);
         renderMaterials(g, mc, p, player);
+        renderHammerHint(g, mc);
+    }
+
+    /** 망치로 겨눈 칸을 못 놓으면 조준점 아래에 이유. */
+    private static void renderHammerHint(GuiGraphics g, Minecraft mc) {
+        Component hint = ProjectionManager.hammerHint;
+        if (hint == null || mc.screen != null) return;
+        Font font = mc.font;
+        java.util.List<net.minecraft.util.FormattedCharSequence> lines = font.split(hint, Math.min(320, g.guiWidth() - 20));
+        int y = g.guiHeight() / 2 + 12;
+        for (net.minecraft.util.FormattedCharSequence line : lines) {
+            int w = font.width(line);
+            int x = (g.guiWidth() - w) / 2;
+            g.fill(x - 3, y - 2, x + w + 3, y + 10, 0xA0000000);
+            g.drawString(font, line, x, y, 0xFFFF7070, false);
+            y += 12;
+        }
     }
 
     // ------------------------------------------------------------------

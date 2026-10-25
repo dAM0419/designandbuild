@@ -33,7 +33,7 @@ import java.util.Map;
  * 철거는 위층부터, 나머지는 아래층부터 진행한다. 비교는 클라이언트가 가진 월드 블록으로 조금씩 굴려 가며 한다.
  */
 public final class Projection {
-    public static final byte UNKNOWN = 0, DONE = 1, PLACE = 2, WRONG = 3, DEMOLISH = 4, FILL = 5, CONVERT = 6, WAIT = 7;
+    public static final byte UNKNOWN = 0, DONE = 1, PLACE = 2, WRONG = 3, DEMOLISH = 4, FILL = 5, CONVERT = 6, WAIT = 7, INVALID = 8;
     public static final int STAGE_DEMOLISH = 0, STAGE_FLOOR = 1, STAGE_PATH = 2, STAGE_STRUCTURES = 3;
     public static final int NO_LAYER = Integer.MIN_VALUE;
 
@@ -69,7 +69,7 @@ public final class Projection {
     @org.jetbrains.annotations.Nullable
     BlockState ghostAt(long p) {
         int i = index.get(p);
-        return i >= 0 && status[i] == PLACE && inView(i) ? target[i] : null;
+        return i >= 0 && (status[i] == PLACE || status[i] == INVALID) && inView(i) ? target[i] : null;
     }
 
     // ---- 도면 변경 추적 (증분 반영) ----
@@ -521,31 +521,30 @@ public final class Projection {
         if (t.isAir()) return DONE;
         if (StateRules.sameBlockWrongState(world, t)) return WRONG;
         if (StateRules.conversion(level, world, t) != null) return CONVERT;
-        if (waitingForSupport(level, i, x, y, z)) return WAIT;
-        return PLACE;
+        int sup = support(level, i, x, y, z);
+        return sup == 1 ? WAIT : sup == 2 ? INVALID : PLACE;
     }
 
     /**
-     * 지금은 그 자리에서 버틸 수 없는데(매단 랜턴의 천장, 벽 횃불의 벽 등) 받침이 될 이웃이 아직 안 지은 설계 칸이면,
-     * 받침을 지은 뒤에 차례가 오도록 기다린다 (투영에 보이지 않고 망치로 겨눠지지 않는다, 남은 칸으로는 센다).
-     * 이웃이 설계 칸이 아니면 기다려도 소용없으므로 그대로 놓을 칸으로 보여 준다 (망치가 받침이 없다고 알린다).
+     * 받침 상태: 0 = 버틴다, 1 = 받침이 될 이웃이 아직 안 지은 설계 칸이라 기다린다 (투영에 안 보이고 남은 칸으로는 센다),
+     * 2 = 받침이 생길 수 없다 (이웃이 설계 칸이 아니거나 지어도 못 받침) → 놓을 수 없는 칸 (보라 외곽선).
      */
-    private boolean waitingForSupport(ClientLevel level, int i, int x, int y, int z) {
+    private int support(ClientLevel level, int i, int x, int y, int z) {
         BlockState t = target[i];
         BlockPos p = new BlockPos(x, y, z);
         try {
-            if (t.canSurvive(level, p)) return false;
+            if (t.canSurvive(level, p)) return 0;
         } catch (Exception e) {
-            return false;
+            return 0;
         }
         BlockPos.MutableBlockPos q = new BlockPos.MutableBlockPos();
         for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
             q.setWithOffset(p, d);
             int j = index.get(q.asLong());
             if (j < 0 || target[j].isAir()) continue;
-            if (!StateRules.matches(level.getBlockState(q), target[j])) return true;
+            if (!StateRules.matches(level.getBlockState(q), target[j])) return 1;
         }
-        return false;
+        return 2;
     }
 
     private void setStatus(int i, byte ns) {
@@ -946,6 +945,11 @@ public final class Projection {
      * 철거 단계에서는 놓을 칸이 없으니 언제나 없음.
      */
     @org.jetbrains.annotations.Nullable
+    /** 망치로 겨눌 수 있는 상태: 놓을 칸, 그리고 이유를 알려 줄 칸(놓을 수 없음·방향 틀림·가공). */
+    private static boolean aimable(byte st) {
+        return st == PLACE || st == INVALID || st == WRONG || st == CONVERT;
+    }
+
     public BlockPos pickPlaceable(ClientLevel level, net.minecraft.world.phys.Vec3 from, net.minecraft.world.phys.Vec3 dir, double reach) {
         if (cur <= STAGE_DEMOLISH || cur >= stageCount || n == 0) return null;
         int x = net.minecraft.util.Mth.floor(from.x), y = net.minecraft.util.Mth.floor(from.y), z = net.minecraft.util.Mth.floor(from.z);
@@ -961,7 +965,7 @@ public final class Projection {
         for (int guard = 0; guard < 64 && t <= reach; guard++) {
             long p = BlockPos.asLong(x, y, z);
             int i = index.get(p);
-            if (i >= 0 && status[i] == PLACE && inView(i)) return BlockPos.of(p);
+            if (i >= 0 && aimable(status[i]) && inView(i)) return BlockPos.of(p);
             mp.set(x, y, z);
             BlockState w = level.getBlockState(mp);
             if (guard > 0 && !w.isAir() && !w.canBeReplaced() && !w.getCollisionShape(level, mp).isEmpty()) return null;

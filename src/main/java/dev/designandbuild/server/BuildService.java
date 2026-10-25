@@ -3,6 +3,7 @@ package dev.designandbuild.server;
 import dev.designandbuild.DesignAndBuild;
 import dev.designandbuild.Registration;
 import dev.designandbuild.core.BlueprintModel;
+import dev.designandbuild.core.PlaceCheck;
 import dev.designandbuild.core.Resolved;
 import dev.designandbuild.core.Stages;
 import dev.designandbuild.core.StateRules;
@@ -31,12 +32,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.common.util.BlockSnapshot;
 import net.neoforged.neoforge.event.EventHooks;
 import org.jetbrains.annotations.Nullable;
@@ -417,20 +415,19 @@ public final class BuildService {
     // 건설망치 (B2)
     // ------------------------------------------------------------------
 
-    /** 망치로 놓을 수 있는가 (거리·재료 빼고). 놓을 수 있으면 목표 상태, 아니면 null. */
-    @Nullable
-    private static BlockState installable(BlueprintModel m, View v, ServerLevel level, BlockPos p) {
-        Resolved r = m.resolved(p.asLong());
-        if (r == null || r.isAir()) return null;
-        if (!Stages.inBuildStage(m, r, v.kind(), v.structureId())) return null;
-        BlockState target = r.state();
-        if (target.getBlock() instanceof LiquidBlock) return null; // 액체는 양동이로
-        if (!Stages.layerOk(target, p.getY(), v.layerMode(), v.layerY(), v.topDown())) return null;
-        if (!level.isLoaded(p)) return null;
-        BlockState world = level.getBlockState(p);
-        if (StateRules.matches(world, target)) return null;
-        if (!(world.isAir() || world.canBeReplaced())) return null; // 다른 블록이 있으면 철거가 먼저 (망치는 부수지 않는다)
-        return target;
+    /** 망치로 놓을 수 있는가 (거리·재료·보호 구역 빼고). 못 놓으면 그 이유. */
+    private static PlaceCheck.Result check(BlueprintModel m, View v, ServerLevel level, BlockPos p) {
+        return PlaceCheck.check(m, level, p, v.kind(), v.structureId(), v.layerMode(), v.layerY(), v.topDown());
+    }
+
+    /** 이어진 칸 찾기용: 설계·단계·층·자리만 (받침은 놓을 때 본다). */
+    private static boolean candidate(BlueprintModel m, View v, ServerLevel level, BlockPos p) {
+        PlaceCheck.Result r = PlaceCheck.design(m, p, v.kind(), v.structureId(), v.layerMode(), v.layerY(), v.topDown());
+        return r.ok() && PlaceCheck.spot(level, p, r.target()).ok();
+    }
+
+    private static void sendFail(ServerPlayer player, PlaceCheck.Result r) {
+        Net.toPlayer(player, Msg.S_HAMMER_FAIL, r::write);
     }
 
     /** 망치를 쓸 수 있는 상태인가: 주손 망치, 보조손 도면, 그 도면을 투영으로 보고 있음. */
@@ -462,16 +459,20 @@ public final class BuildService {
         BlueprintModel m = hammerContext(player, v);
         if (m == null) return;
         ServerLevel level = player.serverLevel();
-        if (!player.canInteractWithBlock(clicked, 1.0)) return;
+        if (!player.canInteractWithBlock(clicked, 1.0)) {
+            sendFail(player, PlaceCheck.of(PlaceCheck.TOO_FAR, Blocks.AIR.defaultBlockState()));
+            return;
+        }
         BlockPos start = primaryOf(m, clicked);
-        if (installable(m, v, level, start) == null) start = clicked;
-        if (installable(m, v, level, start) == null) {
-            BlueprintManager.toast(player, "designandbuild.hammer.not_projected");
+        if (!start.equals(clicked) && !candidate(m, v, level, start) && candidate(m, v, level, clicked)) start = clicked;
+        if (!candidate(m, v, level, start)) {
+            sendFail(player, check(m, v, level, start));
             return;
         }
         if (!bulk) {
             Report rep = new Report();
-            placeOne(player, m, v, level, start, rep);
+            PlaceCheck.Result r = placeOne(player, m, v, level, start, rep);
+            if (!r.ok()) rep.fail(r);
             rep.send(player, true);
             return;
         }
@@ -484,7 +485,7 @@ public final class BuildService {
         while (!queue.isEmpty() && found.size() < HAMMER_MAX) {
             long c = queue.dequeueLong();
             BlockPos p = BlockPos.of(c);
-            if (installable(m, v, level, p) == null) continue;
+            if (!candidate(m, v, level, p)) continue;
             if (player.distanceToSqr(p.getX() + 0.5, p.getY() + 0.5, p.getZ() + 0.5) > HAMMER_RANGE_SQR) continue;
             found.add(c);
             for (Direction d : Direction.values()) {
@@ -528,16 +529,22 @@ public final class BuildService {
         return rq != null && !rq.isAir() && Stages.isPrimaryPart(rq.state()) ? q : p;
     }
 
-    /** 설치 결과 집계: 놓은 칸 수와 모자란 재료. */
+    /** 설치 결과 집계: 놓은 칸 수, 모자란 재료, 못 놓은 이유별 칸 수. */
     private static final class Report {
         int placed;
-        boolean protectedHit, unsupported;
+        @Nullable
+        PlaceCheck.Result first;
+        final int[] fails = new int[PlaceCheck.COUNT];
         final Object2IntLinkedOpenHashMap<Item> missing = new Object2IntLinkedOpenHashMap<>();
 
+        void fail(PlaceCheck.Result r) {
+            if (first == null) first = r;
+            fails[r.code()]++;
+        }
+
         void send(ServerPlayer player, boolean single) {
-            if (single && placed == 0 && missing.isEmpty()) {
-                BlueprintManager.toast(player, protectedHit ? "designandbuild.hammer.protected"
-                        : unsupported ? "designandbuild.hammer.unsupported" : "designandbuild.hammer.not_projected");
+            if (single && placed == 0 && missing.isEmpty() && first != null) {
+                sendFail(player, first);
                 return;
             }
             Net.toPlayer(player, Msg.S_HAMMER_RESULT, b -> {
@@ -549,77 +556,69 @@ public final class BuildService {
                     b.writeUtf(BuiltInRegistries.ITEM.getKey(e.getKey()).toString());
                     b.writeVarInt(e.getIntValue());
                 }
+                // 이유별 칸 수 (재료 부족은 위 목록, 이미 완료·짝 칸 차례는 세지 않는다)
+                int n = 0;
+                for (int c = 0; c < fails.length; c++) if (counted(c) && fails[c] > 0) n++;
+                b.writeVarInt(n);
+                for (int c = 0; c < fails.length; c++) {
+                    if (!counted(c) || fails[c] == 0) continue;
+                    b.writeVarInt(c);
+                    b.writeVarInt(fails[c]);
+                }
             });
+        }
+
+        private static boolean counted(int code) {
+            return code != PlaceCheck.OK && code != PlaceCheck.MISSING && code != PlaceCheck.DONE && code != PlaceCheck.LOWER_FIRST;
         }
     }
 
-    /** 칸 하나(와 2칸 블록의 짝)를 놓는다. */
-    private static boolean placeOne(ServerPlayer player, BlueprintModel m, View v, ServerLevel level, BlockPos p, Report rep) {
-        BlockState target = installable(m, v, level, p);
-        if (target == null) return false;
-        if (!Stages.isPrimaryPart(target)) {
-            BlockPos q = Stages.partner(target, p);
-            // 짝(아이템을 쓰는 쪽)이 이미 있으면 이 칸만 공짜로 채운다, 아니면 짝 쪽에서 처리한다
-            if (q == null || !level.getBlockState(q).is(target.getBlock())) return false;
-        }
-        // 재료
+    /** 칸 하나(와 2칸 블록의 짝)를 놓는다. 놓았으면 OK, 아니면 이유 (재료 부족은 rep.missing 에도 적는다). */
+    private static PlaceCheck.Result placeOne(ServerPlayer player, BlueprintModel m, View v, ServerLevel level, BlockPos p, Report rep) {
+        PlaceCheck.Result c = check(m, v, level, p);
+        if (!c.ok()) return c;
+        BlockState state = c.target();
+        boolean primary = Stages.isPrimaryPart(state);
+        // 재료 (2칸 블록의 위쪽·머리는 짝을 놓을 때 이미 냈다)
         Object2IntLinkedOpenHashMap<Item> cost = new Object2IntLinkedOpenHashMap<>();
-        if (Stages.isPrimaryPart(target)) {
-            StateRules.requirement(target, (item, c) -> {
+        if (primary) {
+            StateRules.requirement(state, (item, n) -> {
                 if (item instanceof BucketItem || item == Items.BUCKET) return; // 물에 잠김은 그 자리 물을 따른다
-                cost.addTo(item, c);
+                cost.addTo(item, n);
             });
-            if (cost.containsKey(Items.AIR)) return false; // 아이템으로 놓을 수 없는 블록 (불 등)
         }
         boolean free = player.getAbilities().instabuild;
         if (!free) {
+            boolean short_ = false;
             for (var e : cost.object2IntEntrySet()) {
                 int have = player.getInventory().countItem(e.getKey());
                 if (have < e.getIntValue()) {
                     rep.missing.addTo(e.getKey(), e.getIntValue() - have);
-                    return false;
+                    short_ = true;
                 }
             }
+            if (short_) return PlaceCheck.of(PlaceCheck.MISSING, state);
         }
-        // 놓을 상태: 연결 모양 맞춤, 물에 잠김은 그 자리 물 원천일 때만
-        BlockState state = target;
-        if (state.hasProperty(BlockStateProperties.WATERLOGGED)) {
-            boolean water = level.getFluidState(p).is(Fluids.WATER) && level.getFluidState(p).isSource();
-            state = state.setValue(BlockStateProperties.WATERLOGGED, water);
-        }
+        if (!level.mayInteract(player, p)) return PlaceCheck.of(PlaceCheck.PROTECTED, state);
         // 2칸 블록(문·침대·큰 꽃)은 짝 칸이 아직 없을 때 이웃 모양 갱신을 하면 공기로 바뀌어 버린다.
-        // 바닐라 아이템처럼 짝 칸을 함께 놓으므로 이 갱신은 건너뛰고, 짝 칸이 비어 있는지 먼저 본다.
-        BlockPos partnerPos = Stages.isPrimaryPart(target) ? Stages.partner(target, p) : null;
-        if (partnerPos != null) {
-            BlockState wp = level.getBlockState(partnerPos);
-            if (!level.isLoaded(partnerPos) || !(wp.isAir() || wp.canBeReplaced())) {
-                rep.unsupported = true;
-                return false;
-            }
-        } else {
+        // 바닐라 아이템처럼 짝 칸을 함께 놓으므로 이 갱신은 건너뛴다 (받침은 판정에서 이미 봤다).
+        BlockPos partnerPos = primary ? Stages.partner(state, p) : null;
+        if (partnerPos == null) {
             state = Block.updateFromNeighbourShapes(state, level, p);
-        }
-        if (!state.canSurvive(level, p)) {
-            rep.unsupported = true;
-            return false;
-        }
-        if (!level.mayInteract(player, p)) {
-            rep.protectedHit = true;
-            return false;
+            if (state.isAir()) return PlaceCheck.of(PlaceCheck.FAILED, c.target());
         }
         BlockSnapshot snap = BlockSnapshot.create(level.dimension(), level, p);
-        if (!level.setBlock(p, state, Block.UPDATE_ALL)) return false;
+        if (!level.setBlock(p, state, Block.UPDATE_ALL)) return PlaceCheck.of(PlaceCheck.FAILED, state);
         if (EventHooks.onBlockPlace(player, snap, Direction.UP)) {
             snap.restore(Block.UPDATE_ALL);
-            rep.protectedHit = true;
-            return false;
+            return PlaceCheck.of(PlaceCheck.PROTECTED, state);
         }
         // 짝 칸
         BlockPos q = partnerPos;
         if (q != null) {
             Resolved rq = m.resolved(q.asLong());
             BlockState wq = level.getBlockState(q);
-            if (rq != null && !rq.isAir() && rq.state().is(target.getBlock()) && (wq.isAir() || wq.canBeReplaced())) {
+            if (rq != null && !rq.isAir() && rq.state().is(state.getBlock()) && (wq.isAir() || wq.canBeReplaced())) {
                 level.setBlock(q, Block.updateFromNeighbourShapes(rq.state(), level, q), Block.UPDATE_ALL);
             }
         }
@@ -634,7 +633,7 @@ public final class BuildService {
         level.playSound(null, p, sound.getPlaceSound(), SoundSource.BLOCKS, (sound.getVolume() + 1.0F) / 2.0F,
                 sound.getPitch() * 0.8F);
         rep.placed++;
-        return true;
+        return c;
     }
 
     private static final class HammerJob implements Job {
@@ -668,11 +667,13 @@ public final class BuildService {
             int end = Math.min(list.length, index + HAMMER_PER_TICK);
             for (; index < end; index++) {
                 BlockPos pos = BlockPos.of(list[index]);
-                boolean was = rep.unsupported;
-                rep.unsupported = false;
-                boolean ok = placeOne(p, model, v, level, pos, rep);
-                if (!ok && rep.unsupported && !retrying) retry.add(list[index]);
-                rep.unsupported = was || rep.unsupported;
+                PlaceCheck.Result r = placeOne(p, model, v, level, pos, rep);
+                if (r.ok()) continue;
+                if (r.supportIssue() && !retrying) {
+                    retry.add(list[index]); // 받침이 나중에 놓일 수 있다: 끝에 한 번 더
+                } else {
+                    rep.fail(r);
+                }
             }
             if (index < list.length) return false;
             if (!retrying && !retry.isEmpty()) {

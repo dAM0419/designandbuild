@@ -5,7 +5,7 @@
 
 > Design villages and large builds on a blueprint table in a quarter-view editor, then build them in the world step by step: demolition, floors, paths, then structures in your chosen order.
 
-현재 버전: **0.2.15** (개발 중, 공개 전)
+현재 버전: **0.2.16** (개발 중, 공개 전)
 
 ---
 
@@ -129,6 +129,7 @@ gradlew.bat build        # Windows
 | 파란 상자 | 메울 액체 원천 |
 | 주황 외곽선 | 같은 블록인데 방향 등이 다름 |
 | 청록 외곽선 | 도구로 가공하면 되는 블록 |
+| 보라 외곽선 | 그 자리에 놓을 수 없는 설계 (받침이 생길 수 없음. 예: 공중에 서 있는 랜턴) |
 
 ### 가공
 
@@ -161,6 +162,8 @@ gradlew.bat build        # Windows
 - 웅크리고 우클릭하면 이어진 칸을 한꺼번에(최대 512칸) 놓아요.
 - 지금 보는 단계와 층의 칸만 놓을 수 있어요.
 - 철거와 가공은 하지 않아요.
+- 겨눈 칸을 놓을 수 없으면 조준 상자가 빨갛게 바뀌고, 조준점 아래에 이유가 떠요(다른 단계·층, 자리 막힘, 방향 다름, 받침 대기, 받침 불가, 설계 오류 등). 받침은 블록 자신의 규칙으로 방향을 찾아서, 어느 칸의 무엇이 문제인지 알려 줘요.
+- 일괄 설치 결과에는 못 놓은 칸 수가 이유별로 붙어요. 예: `12칸 설치 · 받침 불가 3 · 철거 필요 2 · 부족: 흑암석 5`
 
 ### 즉시 반영
 

@@ -171,10 +171,17 @@ public final class ClientNet {
                     if (missing.length() > 0) missing.append(", ");
                     missing.append(item.getDescription().getString()).append(' ').append(c);
                 }
-                Component msg = missing.length() == 0 ? Component.translatable("designandbuild.hammer.placed", placed)
-                        : Component.translatable("designandbuild.hammer.placed_missing", placed, missing.toString());
-                toast(msg);
+                int[] fails = new int[dev.designandbuild.core.PlaceCheck.COUNT];
+                int k = buf.readVarInt();
+                for (int i = 0; i < k; i++) {
+                    int code = buf.readVarInt();
+                    int c = buf.readVarInt();
+                    if (code >= 0 && code < fails.length) fails[code] = c;
+                }
+                toast(dev.designandbuild.client.projection.HammerText.result(placed, missing.toString(), fails));
             }
+            case Msg.S_HAMMER_FAIL -> toast(dev.designandbuild.client.projection.HammerText.describe(
+                    dev.designandbuild.core.PlaceCheck.Result.read(buf)));
             default -> {
             }
         }

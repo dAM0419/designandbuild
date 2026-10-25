@@ -61,6 +61,9 @@ public final class ProjectionManager {
     /** 건설망치가 지금 겨누는 투영 칸 (없으면 null). 틱마다 다시 구한다. */
     @Nullable
     public static net.minecraft.core.BlockPos hammerTarget;
+    /** 겨눈 칸에 망치로 놓을 수 없으면 그 이유 (조준점 아래에 띄운다). 놓을 수 있으면 null. */
+    @Nullable
+    public static net.minecraft.network.chat.Component hammerHint;
     /** 서버에 마지막으로 보낸 보기 상태 (같으면 다시 안 보냄). */
     @Nullable
     private static String sentView;
@@ -72,6 +75,7 @@ public final class ProjectionManager {
 
     public static void reset() {
         hammerTarget = null;
+        hammerHint = null;
         sentView = null;
         INSTANT.clear();
         subscribed = null;
@@ -145,6 +149,7 @@ public final class ProjectionManager {
         }
         if (subscribed == null) {
             hammerTarget = null;
+            hammerHint = null;
             sendView(null);
             drainKeys();
             return;
@@ -179,6 +184,7 @@ public final class ProjectionManager {
         hammerTarget = player.getMainHandItem().is(Registration.HAMMER.get())
                 ? p.pickPlaceable(level, player.getEyePosition(), player.getViewVector(1.0F), player.blockInteractionRange())
                 : null;
+        hammerHint = hammerTarget == null ? null : hammerHint(p, level, hammerTarget);
         ProjectionRenderer.update(p);
         if (++materialsAge >= 10) {
             materialsAge = 0;
@@ -189,6 +195,16 @@ public final class ProjectionManager {
                 layerMaterials = p.materials(level, true);
             }
         }
+    }
+
+    /** 서버와 같은 판정으로 겨눈 칸을 미리 본다 (재료·보호 구역은 서버만 안다). */
+    @Nullable
+    private static net.minecraft.network.chat.Component hammerHint(Projection p, net.minecraft.client.multiplayer.ClientLevel level,
+                                                                  net.minecraft.core.BlockPos pos) {
+        int[] k = p.currentStageKey();
+        dev.designandbuild.core.PlaceCheck.Result r = dev.designandbuild.core.PlaceCheck.check(p.model, level, pos, k[0], k[1],
+                p.layerMode(), p.currentLayer(), p.currentStage() == Projection.STAGE_DEMOLISH);
+        return r.ok() ? null : HammerText.describe(r);
     }
 
     /** 보는 단계·층이 바뀌면 서버에 알린다 (건설망치 판정용). */

@@ -41,4 +41,5 @@ public final class Msg {
     public static final int S_INSTANT_STATE = 14;
     public static final int S_HAMMER_RESULT = 15;
     public static final int S_TOAST_N = 16;
+    public static final int S_HAMMER_FAIL = 17;
 }
