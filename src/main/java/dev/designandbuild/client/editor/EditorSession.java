@@ -88,19 +88,22 @@ public final class EditorSession {
     public boolean placeMirror;
     /** 구조물 배치 기준: false = 블록 밖에(기본), true = 가리킨 블록 층에 겹쳐 */
     public boolean placeInto;
+    /** 구조물 배치 방식: 설치(기본, 조각 그대로) / 채우기 / 대체 / 지우기 (조각의 공기 아닌 칸에 대해). */
+    public Op placeOp = Op.INSTALL;
 
     // ---- 단면 ----
+    /** 단면 보기 전체 켜기·끄기. */
     public boolean cutActive;
-    /** 단면 축. Y는 위쪽을, X·Z는 카메라 쪽을 숨긴다. */
+    /** 축별 단면 (X·Y·Z 를 동시에 켤 수 있다, 순서는 Axis.ordinal). Y는 위쪽을, X·Z는 카메라 쪽을 숨긴다. */
+    public final boolean[] cutOn = new boolean[3];
+    /** 축별 단면 평면이 지나는 칸 좌표. 이 줄은 보이는 쪽에 남는다. */
+    public final int[] cutAt = new int[3];
+    /** 지금 조작하는 축 (Shift+휠, Ctrl+클릭, Shift+L). */
     public Direction.Axis cutAxis = Direction.Axis.Y;
-    /** 단면 평면이 지나는 칸 좌표 (축 방향). 이 줄은 보이는 쪽에 남는다. */
-    public int cutPos;
     public boolean bubble;
-    /** 이 층만 보기 (아래층도 숨김). 기본은 이 층 이하. */
+    /** 이 면만 보기 (반대쪽도 숨김). 기본은 이 면까지. 켜진 모든 축에 같이 쓴다. */
     public boolean cutOnlyLayer;
     public int cutStamp;
-    private int lastCutY = Integer.MIN_VALUE;
-    private int lastCutScope = Integer.MIN_VALUE;
 
     // ---- 통신·공동 편집 ----
     public int pending;
@@ -153,6 +156,33 @@ public final class EditorSession {
         return snapshot.get(x, y, z);
     }
 
+    /**
+     * 화면에 보이는 블록 (그리기·커서용). 구조물 편집 중이면(구조물 선택 + 직접조작) 그 구조물 블록만 보인다.
+     * 설치·채우기 같은 판정은 이것이 아니라 {@link #blockAt} 을 쓴다 (숨겨도 지형은 그대로 있다).
+     */
+    public BlockState visibleAt(int x, int y, int z, boolean hideCut) {
+        BlockState st = blockAt(x, y, z, hideCut);
+        int iso = isolated();
+        if (iso == 0 || st.isAir()) return st;
+        Resolved r = model.resolved(x, y, z);
+        return r != null && r.owner() == iso ? st : AIR;
+    }
+
+    /** 구조물 편집 중이면 그 구조물 ID (나머지를 숨긴다), 아니면 0. */
+    public int isolated() {
+        return selected != 0 && tool == Tool.DIRECT && model.structure(selected) != null ? selected : 0;
+    }
+
+    private int lastIsolated;
+
+    /** 구조물 편집에 들어가거나 나오면 화면 전체를 다시 굽는다. 매 프레임 부른다. */
+    public void checkIsolationChanged() {
+        int iso = isolated();
+        if (iso == lastIsolated) return;
+        lastIsolated = iso;
+        if (renderer != null) renderer.markAll();
+    }
+
     /** 설계를 뺀 원래 월드 (스냅샷). */
     public BlockState worldAt(int x, int y, int z) {
         return snapshot.get(x, y, z);
@@ -166,8 +196,12 @@ public final class EditorSession {
      * 정면으로 볼 때처럼 카메라가 그 축과 수직이면 어느 쪽인지 알 수 없으므로 직전 값을 쓴다.
      */
     public int cutSign() {
+        return cutSign(cutAxis);
+    }
+
+    public int cutSign(Direction.Axis axis) {
         org.joml.Vector3f c = camera.toCamera();
-        return switch (cutAxis) {
+        return switch (axis) {
             case Y -> 1;
             case X -> {
                 if (Math.abs(c.x) > 0.05F) lastCutSignX = c.x > 0 ? 1 : -1;
@@ -180,11 +214,30 @@ public final class EditorSession {
         };
     }
 
+    /** 지금 조작하는 축의 단면 위치. */
+    public int cutPos() {
+        return cutAt[cutAxis.ordinal()];
+    }
+
+    /** 켜진 축이 하나라도 있는 단면 보기인가. */
+    public boolean cutting() {
+        return cutActive && (cutOn[0] || cutOn[1] || cutOn[2]);
+    }
+
     public boolean isCut(int x, int y, int z) {
         if (!cutActive) return false;
-        int c = cutAxis == Direction.Axis.X ? x : cutAxis == Direction.Axis.Y ? y : z;
-        int d = (c - cutPos) * cutSign();
-        if (d == 0 || (d < 0 && !cutOnlyLayer)) return false;
+        boolean hidden = false;
+        for (Direction.Axis ax : Direction.Axis.values()) {
+            int i = ax.ordinal();
+            if (!cutOn[i]) continue;
+            int c = ax == Direction.Axis.X ? x : ax == Direction.Axis.Y ? y : z;
+            int d = (c - cutAt[i]) * cutSign(ax);
+            if (d > 0 || (d < 0 && cutOnlyLayer)) {
+                hidden = true;
+                break;
+            }
+        }
+        if (!hidden) return false;
         Box scope = cutScope();
         return scope == null || scope.contains(x, y, z);
     }
@@ -197,18 +250,20 @@ public final class EditorSession {
         return new Box(a.minX(), renderMinY, a.minZ(), a.maxX(), model.maxY - 1, a.maxZ());
     }
 
-    /** 숨겨지는 칸 범위들 (숨기는 쪽, "이 면만"이면 반대쪽도). */
+    /** 숨겨지는 칸 범위들 (켜진 축마다 숨기는 쪽, "이 면만"이면 반대쪽도). 겹쳐도 된다. */
     public List<Box> cutRegions() {
-        List<Box> out = new ArrayList<>(2);
+        List<Box> out = new ArrayList<>(6);
         if (!cutActive) return out;
         Box scope = cutBounds();
-        int a = cutAxis.ordinal();
         int[] min = {scope.minX(), scope.minY(), scope.minZ()};
         int[] max = {scope.maxX(), scope.maxY(), scope.maxZ()};
-        int sign = cutSign();
-        // 숨기는 쪽
-        addSlab(out, min, max, a, sign > 0 ? cutPos + 1 : min[a], sign > 0 ? max[a] : cutPos - 1);
-        if (cutOnlyLayer) addSlab(out, min, max, a, sign > 0 ? min[a] : cutPos + 1, sign > 0 ? cutPos - 1 : max[a]);
+        for (Direction.Axis ax : Direction.Axis.values()) {
+            int a = ax.ordinal();
+            if (!cutOn[a]) continue;
+            int sign = cutSign(ax), pos = cutAt[a];
+            addSlab(out, min, max, a, sign > 0 ? pos + 1 : min[a], sign > 0 ? max[a] : pos - 1);
+            if (cutOnlyLayer) addSlab(out, min, max, a, sign > 0 ? min[a] : pos + 1, sign > 0 ? pos - 1 : max[a]);
+        }
         return out;
     }
 
@@ -221,19 +276,24 @@ public final class EditorSession {
         out.add(new Box(a[0], a[1], a[2], b[0], b[1], b[2]));
     }
 
-    /** 단면 축 방향 범위 [최소, 최대] (슬라이더용). Y는 실제 블록이 있는 높이까지만. */
+    /** 지금 조작하는 축의 범위 [최소, 최대] (슬라이더용). */
     public int[] cutRange() {
+        return cutRange(cutAxis);
+    }
+
+    /** 축 방향 범위 [최소, 최대] (슬라이더용). Y는 실제 블록이 있는 높이까지만. */
+    public int[] cutRange(Direction.Axis axis) {
         StructureInstance st = selected != 0 ? model.structure(selected) : null;
         if (st != null && st.bounds() != null) {
             Box b = st.bounds();
-            return switch (cutAxis) {
+            return switch (axis) {
                 case X -> new int[]{b.minX(), b.maxX()};
                 case Y -> new int[]{b.minY(), b.maxY()};
                 case Z -> new int[]{b.minZ(), b.maxZ()};
             };
         }
         Box a = model.areaBounds();
-        return switch (cutAxis) {
+        return switch (axis) {
             case X -> new int[]{a.minX(), a.maxX()};
             case Y -> new int[]{renderMinY, Math.max(renderMinY + 1, topY())};
             case Z -> new int[]{a.minZ(), a.maxZ()};
@@ -275,66 +335,109 @@ public final class EditorSession {
 
     /** 자르기 설정이 바뀌었으면 경계 섹션을 다시 굽게 한다. 매 프레임 부른다. */
     public void checkCutChanged() {
-        int scopeKey = cutActive ? (((selected * 31 + (bubble ? 1 : 0) + (cutOnlyLayer ? 2 : 0)) * 7 + cutAxis.ordinal()) * 3
-                + cutSign() + 1) : Integer.MIN_VALUE + 1;
-        int y = cutActive ? cutPos : Integer.MIN_VALUE + 1;
-        if (y != lastCutY || scopeKey != lastCutScope) {
-            lastCutY = y;
-            lastCutScope = scopeKey;
+        List<Object> key = cutActive
+                ? java.util.Arrays.asList(selected, bubble, cutOnlyLayer, cutOn[0], cutOn[1], cutOn[2], cutAt[0], cutAt[1], cutAt[2],
+                        cutSign(Direction.Axis.X), cutSign(Direction.Axis.Z))
+                : null;
+        if (!java.util.Objects.equals(key, lastCutKey)) {
+            lastCutKey = key;
             cutStamp++;
         }
     }
 
+    @Nullable
+    private List<Object> lastCutKey;
+
+    /** L: 단면 보기 켜기·끄기. 처음 켤 때 켜진 축이 없으면 Y를 켠다. */
     public void toggleCut() {
         cutActive = !cutActive;
-        if (cutActive) resetCutPos();
+        if (cutActive && !cutOn[0] && !cutOn[1] && !cutOn[2]) {
+            cutAxis = Direction.Axis.Y;
+            cutOn[Direction.Axis.Y.ordinal()] = true;
+            resetCutPos(Direction.Axis.Y);
+        }
     }
 
-    /** 축을 바꾸거나 켤 때의 처음 위치: 선택 구조물이 있으면 Y는 바닥·X·Z는 가운데, 없으면 화면 중심. */
-    private void resetCutPos() {
+    /** 축 하나를 켜거나 끈다. 켜면 그 축을 조작 축으로 하고 처음 위치로. */
+    public void toggleCutAxis(Direction.Axis axis) {
+        int i = axis.ordinal();
+        cutOn[i] = !cutOn[i];
+        cutActive = true;
+        if (cutOn[i]) {
+            cutAxis = axis;
+            resetCutPos(axis);
+        } else if (cutAxis == axis) {
+            for (Direction.Axis a : new Direction.Axis[]{Direction.Axis.Y, Direction.Axis.X, Direction.Axis.Z}) {
+                if (cutOn[a.ordinal()]) {
+                    cutAxis = a;
+                    break;
+                }
+            }
+        }
+    }
+
+    /** 축을 켜거나 끄지 않고 조작 축만 바꾼다 (켜져 있을 때). */
+    public void focusCutAxis(Direction.Axis axis) {
+        if (cutOn[axis.ordinal()]) cutAxis = axis;
+    }
+
+    /** 처음 위치: 선택 구조물이 있으면 Y는 바닥·X·Z는 가운데, 없으면 화면 중심. */
+    private void resetCutPos(Direction.Axis axis) {
         StructureInstance s = selected != 0 ? model.structure(selected) : null;
+        int v;
         if (s != null && s.bounds() != null) {
             Box b = s.bounds();
-            cutPos = switch (cutAxis) {
+            v = switch (axis) {
                 case X -> (b.minX() + b.maxX()) / 2;
                 case Y -> b.minY();
                 case Z -> (b.minZ() + b.maxZ()) / 2;
             };
         } else {
-            cutPos = switch (cutAxis) {
+            v = switch (axis) {
                 case X -> Mth.floor(camera.tx);
                 case Y -> Mth.floor(camera.ty);
                 case Z -> Mth.floor(camera.tz);
             };
         }
+        cutAt[axis.ordinal()] = v;
     }
 
-    /** 축 전환 Y → X → Z. 단면이 꺼져 있으면 켠다. */
+    /** Shift+L: 조작 축을 Y → X → Z 로 바꾼다. 꺼져 있던 축이면 켠다. */
     public void cycleCutAxis() {
-        cutAxis = switch (cutAxis) {
+        Direction.Axis next = switch (cutAxis) {
             case Y -> Direction.Axis.X;
             case X -> Direction.Axis.Z;
             case Z -> Direction.Axis.Y;
         };
         cutActive = true;
-        resetCutPos();
+        if (!cutOn[next.ordinal()]) {
+            cutOn[next.ordinal()] = true;
+            resetCutPos(next);
+        }
+        cutAxis = next;
     }
 
-    /** Ctrl+클릭: 그 블록을 지나는 평면으로 자른다. 그 블록의 줄은 보이는 쪽에 남는다. */
+    /** Ctrl+클릭: 조작 축에서 그 블록을 지나는 평면으로 자른다. 그 블록의 줄은 보이는 쪽에 남는다. */
     public void setCutAt(BlockPos p) {
         cutActive = true;
-        cutPos = switch (cutAxis) {
+        cutOn[cutAxis.ordinal()] = true;
+        cutAt[cutAxis.ordinal()] = switch (cutAxis) {
             case X -> p.getX();
             case Y -> p.getY();
             case Z -> p.getZ();
         };
     }
 
-    /** 한 칸 이동. +면 숨긴 쪽으로 (더 드러남), -면 반대로. */
+    /** 조작 축에서 한 칸 이동. +면 숨긴 쪽으로 (더 드러남), -면 반대로. */
     public void moveCut(int delta) {
-        if (!cutActive) return;
-        int[] r = cutRange();
-        cutPos = Mth.clamp(cutPos + delta * cutSign(), r[0] - 1, r[1] + 1);
+        moveCut(cutAxis, delta);
+    }
+
+    public void moveCut(Direction.Axis axis, int delta) {
+        if (!cutActive || !cutOn[axis.ordinal()]) return;
+        int[] r = cutRange(axis);
+        int i = axis.ordinal();
+        cutAt[i] = Mth.clamp(cutAt[i] + delta * cutSign(axis), r[0] - 1, r[1] + 1);
     }
 
     // ------------------------------------------------------------------
@@ -418,7 +521,7 @@ public final class EditorSession {
         double max = t1 - t0;
         BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
         for (int guard = 0; guard < 20000; guard++) {
-            BlockState st = blockAt(x, y, z, true);
+            BlockState st = visibleAt(x, y, z, true);
             if (!st.isAir()) {
                 mp.set(x, y, z);
                 VoxelShape shape = st.getShape(cutWorld, mp);
@@ -579,12 +682,6 @@ public final class EditorSession {
         attachListener();
         if (selected != 0 && model.structure(selected) == null) selected = 0;
         if (renderer != null) renderer.markAll();
-    }
-
-    /** 오래(약 8초) 떠 있는 알림. */
-    public void toastLong(Component text) {
-        toasts.add(new Toast(text, System.currentTimeMillis() + 5000, 1));
-        while (toasts.size() > 3) toasts.remove(0);
     }
 
     public void toast(Component text) {

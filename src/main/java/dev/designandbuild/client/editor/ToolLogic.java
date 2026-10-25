@@ -333,8 +333,12 @@ public final class ToolLogic {
         return new Transformed(t, steps, mirror, fsx, t.sizeY, fsz, xs, ys, zs, states, mount);
     }
 
+    /**
+     * @param kept 배치 방식이 설치가 아닐 때 실제로 쓰는 칸 번호 (조각의 공기 아닌 칸 중 조건에 맞는 것). 설치면 null = 전부.
+     */
     public record Placement(Transformed shape, int ox, int oy, int oz, @Nullable String error,
-                            long[] pos, BlockState[] states, long[] conflicts, long[] floating, int replaced) {
+                            long[] pos, BlockState[] states, long[] conflicts, long[] floating, int replaced,
+                            @Nullable int[] kept) {
         public boolean valid() {
             return error == null;
         }
@@ -388,6 +392,11 @@ public final class ToolLogic {
         }
         int n = tr.states().length;
         int replaced = 0;
+        EditorSession.Op op = s.placeOp;
+        boolean install = op == EditorSession.Op.INSTALL;
+        // 설치가 아니면 조각을 "붓"처럼 쓴다: 조각의 공기 아닌 칸 자리에 채우기·대체·지우기
+        it.unimi.dsi.fastutil.ints.IntArrayList kept = install ? null : new it.unimi.dsi.fastutil.ints.IntArrayList();
+        boolean eraseIntoStructure = s.selected != 0;
         long[] pos = new long[n];
         LongArrayList conflicts = new LongArrayList();
         LongArrayList floating = new LongArrayList();
@@ -401,6 +410,17 @@ public final class ToolLogic {
             }
             BlockState st = tr.states()[i];
             if (st.isAir()) continue;
+            if (!install) {
+                BlockState cur = s.blockAt(x, y, z, false);
+                boolean ok = switch (op) {
+                    case FILL -> (cur.isAir() || cur.canBeReplaced()) && s.editable(pos[i], true);
+                    case REPLACE -> !cur.isAir() && s.editable(pos[i], true);
+                    default -> !cur.isAir() && s.editable(pos[i], eraseIntoStructure);   // 지우기
+                };
+                if (!ok) continue;
+                kept.add(i);
+                if (op == EditorSession.Op.ERASE) continue;   // 지우기는 겹침·받침 표시가 필요 없다
+            }
             Resolved r = s.model.resolved(pos[i]);
             if (r != null && r.owner() != 0 && !r.isAir() && r.state() != st) conflicts.add(pos[i]);
             // 겹쳐 놓기: 기존 바닥·길 설계 칸을 이 구조물이 대체한다
@@ -411,7 +431,9 @@ public final class ToolLogic {
             }
         }
         if (error == null && outside) error = "designandbuild.msg.outside_area";
-        return new Placement(tr, ox, oy, oz, error, pos, tr.states(), conflicts.toLongArray(), floating.toLongArray(), replaced);
+        if (error == null && kept != null && kept.isEmpty()) error = "designandbuild.msg.place_nothing";
+        return new Placement(tr, ox, oy, oz, error, pos, tr.states(), conflicts.toLongArray(), floating.toLongArray(), replaced,
+                kept == null ? null : kept.toIntArray());
     }
 
     private static Transformed lastTransform;
@@ -428,11 +450,34 @@ public final class ToolLogic {
             s.toast(Component.translatable(p.error()));
             return;
         }
+        long[] pos = p.pos();
+        BlockState[] states = p.states();
+        if (p.kept() != null) {
+            int[] k = p.kept();
+            pos = new long[k.length];
+            states = new BlockState[k.length];
+            for (int i = 0; i < k.length; i++) {
+                pos[i] = p.pos()[k[i]];
+                states[i] = s.placeOp == EditorSession.Op.ERASE ? AIR : p.states()[k[i]];
+            }
+        }
+        ClientConfig.touchRecent(source);
+        if (s.placeOp == EditorSession.Op.ERASE) {
+            // 조각 모양대로 지운다: 구조물을 선택했으면 그 구조물에서, 아니면 지형 층에서 (직접조작 지우기와 같음)
+            int group = dev.designandbuild.client.ClientStore.nextGroup();
+            if (s.selected != 0) {
+                s.send(new Requests.StructCells(group, s.selected, "", pos, states));
+            } else {
+                DesignTag[] tags = new DesignTag[pos.length];
+                java.util.Arrays.fill(tags, DesignTag.NONE);
+                s.send(new Requests.Terrain(group, pos, states, tags));
+            }
+            return;
+        }
         // 배치한 구조물은 자동으로 선택하지 않는다 (이어서 지우기를 하면 그 구조물의 공기 지정이 되어 버리므로)
         s.send(new Requests.StructCreate(0, name, source, p.shape().mount(),
                 rotationOf(p.shape().rotation()), p.shape().mirror() ? Mirror.FRONT_BACK : Mirror.NONE,
-                p.pos(), p.states()));
-        ClientConfig.touchRecent(source);
+                pos, states));
     }
 
     public static Rotation rotationOf(int steps) {

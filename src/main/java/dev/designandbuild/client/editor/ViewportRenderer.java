@@ -154,6 +154,15 @@ public final class ViewportRenderer {
                 fillBox(quads, m, x - tx - 0.01, y - ty - 0.01, z - tz - 0.01, 1.02, Ui.withAlpha(Ui.DEMOLISH, 70));
             }
         }
+        if (s.tool == EditorSession.Tool.PLACE && pl != null && s.placeOp == EditorSession.Op.ERASE && pl.kept() != null
+                && pl.kept().length <= ToolLogic.GHOST_LIMIT) {
+            // 조각 모양 지우기: 지워질 칸
+            for (int i : pl.kept()) {
+                long p = pl.pos()[i];
+                fillBox(quads, m, BlockPos.getX(p) - tx - 0.01, BlockPos.getY(p) - ty - 0.01, BlockPos.getZ(p) - tz - 0.01, 1.02,
+                        Ui.withAlpha(Ui.DEMOLISH, 70));
+            }
+        }
         if (s.tool == EditorSession.Tool.PLACE && pl != null) {
             for (long p : pl.conflicts()) {
                 fillBox(quads, m, BlockPos.getX(p) - tx - 0.02, BlockPos.getY(p) - ty - 0.02, BlockPos.getZ(p) - tz - 0.02, 1.04,

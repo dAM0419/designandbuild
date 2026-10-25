@@ -32,7 +32,7 @@ public final class EditorWorld implements BlockAndTintGetter {
 
     @Override
     public BlockState getBlockState(BlockPos pos) {
-        return session.blockAt(pos.getX(), pos.getY(), pos.getZ(), hideCut);
+        return session.visibleAt(pos.getX(), pos.getY(), pos.getZ(), hideCut);
     }
 
     @Override

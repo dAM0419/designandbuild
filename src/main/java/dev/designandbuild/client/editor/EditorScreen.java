@@ -65,6 +65,8 @@ public final class EditorScreen extends Screen {
     public final SidePanel sidePanel;
     public final LayerSlider layerSlider;
     public final dev.designandbuild.client.editor.ui.ViewCube viewCube;
+    /** 이번 클릭으로 설치 미리보기 창이 닫혔다 (옵션 바 버튼이 다시 열지 않게). */
+    public boolean popupJustClosed;
     private final List<UiPart> parts = new ArrayList<>();
 
     @Nullable
@@ -115,8 +117,6 @@ public final class EditorScreen extends Screen {
     // ---- 미리보기 캐시 ----
     public final Preview preview = new Preview();
 
-    private boolean shaderWarned;
-
     public EditorScreen(EditorSession session) {
         super(Component.translatable("designandbuild.editor.title"));
         this.s = session;
@@ -127,13 +127,15 @@ public final class EditorScreen extends Screen {
         this.sidePanel = new SidePanel(this);
         this.layerSlider = new LayerSlider(this);
         this.viewCube = new dev.designandbuild.client.editor.ui.ViewCube(this);
-        parts.add(topBar);
-        parts.add(toolBar);
-        parts.add(optionBar);
+        // 그리는 순서 = 아래에서 위로 (누르기는 반대 순서로 위에 있는 것부터).
+        // 뷰포트 위 도구(팔레트·단면 슬라이더·시점 큐브) < 오른쪽 창 < 가장자리 바 (옵션·도구·상단)
         parts.add(paletteBar);
-        parts.add(sidePanel);
         parts.add(layerSlider);
         parts.add(viewCube);
+        parts.add(sidePanel);
+        parts.add(toolBar);
+        parts.add(optionBar);
+        parts.add(topBar);
     }
 
     public EditorSession session() {
@@ -162,12 +164,6 @@ public final class EditorScreen extends Screen {
     protected void init() {
         ClientLibrary.refresh();
         layout();
-        if (!shaderWarned) {
-            shaderWarned = true;
-            if (dev.designandbuild.client.projection.ProjectionRenderer.shaderPackInUse()) {
-                s.toastLong(Component.translatable("designandbuild.msg.shader_warning"));
-            }
-        }
     }
 
     @Override
@@ -245,6 +241,7 @@ public final class EditorScreen extends Screen {
         }
         s.tickEffects();
         s.checkCutChanged();
+        s.checkIsolationChanged();
         keyboardPan();
         s.renderer.update(6_000_000L);
         Thumbnails.frame();
@@ -434,19 +431,25 @@ public final class EditorScreen extends Screen {
             }
             // 커서·회전·기준·도면이 그대로면 다시 계산하지 않는다 (큰 조각은 칸 수만큼 조회가 든다)
             List<Object> k = java.util.Arrays.asList(t, h.pos().asLong(), h.face(), s.placeRotation, s.placeMirror,
-                    s.placeInto, s.model.revision());
+                    s.placeInto, s.placeOp, s.model.revision());
             if (placement != null && k.equals(placementKey)) return;
             placementKey = k;
             placement = ToolLogic.placement(s, t, h);
-            if (placementShape != placement.shape()) {
-                placementShape = placement.shape();
+            // 설치는 조각 모양이 같으면 유령을 다시 쓰고, 채우기·대체는 놓일 칸이 자리마다 달라 매번 다시 굽는다. 지우기는 붉은 상자로 표시
+            boolean filtered = placement.kept() != null;
+            if (filtered || placementShape != placement.shape()) {
+                placementShape = filtered ? null : placement.shape();
                 if (placementGhost != null) placementGhost.close();
                 placementGhost = null;
                 ToolLogic.Transformed tr = placement.shape();
-                if (tr.states().length <= 60_000) {
+                int[] kept = placement.kept();
+                boolean erase = s.placeOp == EditorSession.Op.ERASE;
+                if (!erase && tr.states().length <= 60_000) {
                     it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<BlockState> map = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
                     List<BlockPos> list = new ArrayList<>();
-                    for (int i = 0; i < tr.states().length; i++) {
+                    int count = kept != null ? kept.length : tr.states().length;
+                    for (int j = 0; j < count; j++) {
+                        int i = kept != null ? kept[j] : j;
                         if (tr.states()[i].isAir()) continue;
                         BlockPos p = new BlockPos(tr.xs()[i], tr.ys()[i], tr.zs()[i]);
                         map.put(p.asLong(), tr.states()[i]);
@@ -487,6 +490,7 @@ public final class EditorScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        popupJustClosed = false;
         if (!s.ready) return true;
         if (modal != null) {
             modal.mouseClicked(mx, my, button);
@@ -508,6 +512,8 @@ public final class EditorScreen extends Screen {
             }
             orientationPopup = null;
             if (!optionBar.contains(mx, my)) return true;
+            // 옵션 바의 설치 미리보기 버튼을 다시 누른 것이면 닫기만 한다 (버튼이 곧바로 다시 열지 않게)
+            popupJustClosed = true;
         }
         for (int i = parts.size() - 1; i >= 0; i--) {
             UiPart p = parts.get(i);
@@ -636,6 +642,12 @@ public final class EditorScreen extends Screen {
         movePlane = h.face().getAxis() == moveAxis
                 ? c + (h.face().getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1 : 0) : c + 0.5;
         moveStart = s.camera.planePoint(mouseX, mouseY, moveAxis, movePlane);
+    }
+
+    /** 1~4: 배치 도구면 배치 방식, 아니면 직접조작 방식. */
+    private void setOp(EditorSession.Op op) {
+        if (s.tool == EditorSession.Tool.PLACE) s.placeOp = op;
+        else s.op = op;
     }
 
     private void eyedropper(EditorSession.Hit h) {
@@ -867,10 +879,10 @@ public final class EditorScreen extends Screen {
             case GLFW.GLFW_KEY_V -> setTool(EditorSession.Tool.SELECT);
             case GLFW.GLFW_KEY_B -> setTool(EditorSession.Tool.DIRECT);
             case GLFW.GLFW_KEY_P -> setTool(EditorSession.Tool.PLACE);
-            case GLFW.GLFW_KEY_1 -> s.op = EditorSession.Op.INSTALL;
-            case GLFW.GLFW_KEY_2 -> s.op = EditorSession.Op.FILL;
-            case GLFW.GLFW_KEY_3 -> s.op = EditorSession.Op.REPLACE;
-            case GLFW.GLFW_KEY_4 -> s.op = EditorSession.Op.ERASE;
+            case GLFW.GLFW_KEY_1 -> setOp(EditorSession.Op.INSTALL);
+            case GLFW.GLFW_KEY_2 -> setOp(EditorSession.Op.FILL);
+            case GLFW.GLFW_KEY_3 -> setOp(EditorSession.Op.REPLACE);
+            case GLFW.GLFW_KEY_4 -> setOp(EditorSession.Op.ERASE);
             case GLFW.GLFW_KEY_Q -> s.camera.rotate(-1);
             case GLFW.GLFW_KEY_E -> s.camera.rotate(1);
             case GLFW.GLFW_KEY_R -> rotateKey();

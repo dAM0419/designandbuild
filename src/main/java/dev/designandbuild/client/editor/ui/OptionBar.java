@@ -250,6 +250,8 @@ public final class OptionBar extends UiPart {
             }, b -> {
                 if (screen.orientationPopup != null) {
                     screen.orientationPopup = null;
+                } else if (screen.popupJustClosed) {
+                    // 방금 이 클릭으로 닫혔다: 다시 열지 않는다
                 } else if (!OrientationPopup.oriented(s)) {
                     screen.session().toast(Component.translatable("designandbuild.orientation.none"));
                 } else {
@@ -293,6 +295,15 @@ public final class OptionBar extends UiPart {
         }, null, null, null));
         label(Ui.clip(s.placing.name(), 140), Ui.TEXT);
         if (t != null) label(t.sizeX + "×" + t.sizeY + "×" + t.sizeZ, Ui.DIM);
+        sep();
+        // 배치 방식: 설치 / 채우기 / 대체 / 지우기 (조각의 공기 아닌 칸에 대해)
+        EditorSession.Op[] ops = EditorSession.Op.values();
+        int[] opIcons = {Icons.INSTALL, Icons.FILL, Icons.REPLACE, Icons.ERASE};
+        for (int i = 0; i < 4; i++) {
+            EditorSession.Op op = ops[i];
+            iconButton(opIcons[i], () -> s.placeOp == op, () -> s.placeOp = op, "designandbuild.place.op." + op.name().toLowerCase(),
+                    Integer.toString(i + 1));
+        }
         sep();
         iconButton(Icons.ROTATE_R, () -> false, () -> s.placeRotation = (s.placeRotation + 1) & 3, "designandbuild.place.rotate", "R");
         iconButton(Icons.MIRROR, () -> s.placeMirror, () -> s.placeMirror = !s.placeMirror, "designandbuild.place.mirror", "F");

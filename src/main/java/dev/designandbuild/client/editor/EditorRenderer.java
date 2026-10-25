@@ -398,7 +398,7 @@ public final class EditorRenderer implements AutoCloseable {
             for (long p : m.dynamic) {
                 int x = BlockPos.getX(p), y = BlockPos.getY(p), z = BlockPos.getZ(p);
                 if (pass == Pass.LOWER && s.cutActive && s.isCut(x, y, z)) continue;
-                BlockState state = s.blockAt(x, y, z, false);
+                BlockState state = s.visibleAt(x, y, z, false);
                 pose.pushPose();
                 pose.translate(x - s.camera.tx, y - s.camera.ty, z - s.camera.tz);
                 if (state.hasProperty(BlockStateProperties.HORIZONTAL_FACING)) {
