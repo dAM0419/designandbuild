@@ -33,7 +33,7 @@ import java.util.Map;
  * 그 위에서 블록을 설치하는 가상 플레이어의 입력 세 가지를 고른다.
  * <pre>
  * 바라보는 방향: 미리보기 둘레의 방위 단추 4개(바닥 축 방향에 놓임) + 위 보기 / 아래 보기
- * 붙일 면:       미리보기 육면체의 보이는 면을 누름. 안 보이는 면은 "반대면"
+ * 붙일 면:       미리보기 육면체의 보이는 면을 누름. 안 보이는 면은 "반대면" (뒤쪽 면은 점선으로 비쳐 보이고, 고른 뒤쪽 면은 채워 보인다)
  * 위·아래 절반:  옆면을 누른 위치(면의 위 절반 / 아래 절반)
  * </pre>
  * 미리보기는 편집창 시점 방향으로 그리고, 끌면 돌려 볼 수 있다(설정은 그대로, 놓으면 시점 방향으로 돌아온다).
@@ -194,6 +194,22 @@ public final class OrientationPopup {
         if (!states.isEmpty()) drawBlock(g, states.get(0), cx(), cy(), CUBE, viewYaw());
         // 면 겹침: 고른 면 채움 + 커서 면 강조 + 육면체 외곽
         Direction hoverFace = Ui.inside(mx, my, px, py, PV, PV) && !dragged ? faceAt(m, mx, my) : null;
+        // 뒤쪽 면 (투시): 블록 너머로 비쳐 보이게 점선 외곽, 고른 면이면 옅게 채움
+        for (Direction d : Direction.values()) {
+            if (visible(m, d)) continue;
+            float[][] q = screenFace(m, d);
+            if (d == s.face) {
+                if (d.getAxis().isHorizontal()) {
+                    float[] l = mid(q[0], q[3]), r = mid(q[1], q[2]);
+                    quad(g, s.upperHalf ? new float[][]{l, r, q[2], q[3]} : new float[][]{q[0], q[1], r, l}, 0x582EC4B6);
+                } else {
+                    quad(g, q, 0x582EC4B6);
+                }
+                for (int i = 0; i < 4; i++) dashed(g, q[i], q[(i + 1) % 4], 0xF02EC4B6);
+            } else {
+                for (int i = 0; i < 4; i++) dashed(g, q[i], q[(i + 1) % 4], 0x908A8F96);
+            }
+        }
         for (Direction d : Direction.values()) {
             if (!visible(m, d)) continue;
             float[][] q = screenFace(m, d);
@@ -288,6 +304,17 @@ public final class OrientationPopup {
         if (len < 1e-3F) return;
         float nx = -dy / len * 0.5F, ny = dx / len * 0.5F;
         quad(g, new float[][]{{a[0] + nx, a[1] + ny}, {b[0] + nx, b[1] + ny}, {b[0] - nx, b[1] - ny}, {a[0] - nx, a[1] - ny}}, color);
+    }
+
+    /** 점선 (3px 그리고 2px 비움). */
+    private static void dashed(GuiGraphics g, float[] a, float[] b, int color) {
+        float dx = b[0] - a[0], dy = b[1] - a[1];
+        float len = (float) Math.sqrt(dx * dx + dy * dy);
+        if (len < 1e-3F) return;
+        for (float t = 0; t < len; t += 5.0F) {
+            float t1 = Math.min(len, t + 3.0F);
+            line(g, new float[]{a[0] + dx * t / len, a[1] + dy * t / len}, new float[]{a[0] + dx * t1 / len, a[1] + dy * t1 / len}, color);
+        }
     }
 
     /** 블록 상태를 비스듬히 본 3D로 그린다 (편집창 시점과 같은 기울기). */

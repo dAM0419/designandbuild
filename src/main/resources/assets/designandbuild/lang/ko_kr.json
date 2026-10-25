@@ -264,7 +264,7 @@
   "designandbuild.orientation.flip": "반대면",
   "designandbuild.orientation.flip_half": "위·아래 뒤집기 (F)",
   "designandbuild.orientation.hidden_face": "붙일 면: %s (뒤쪽)",
-  "designandbuild.orientation.hint": "면을 눌러 붙일 면 · 끌어서 돌려 보기",
+  "designandbuild.orientation.hint": "면 클릭: 붙일 면 · 점선 = 뒤쪽 면 · 끌기: 돌려 보기",
   "designandbuild.orientation.look_dir": "%s쪽 바라보기",
   "designandbuild.orientation.lower": "아래 절반",
   "designandbuild.orientation.no_material": "재료 없음",

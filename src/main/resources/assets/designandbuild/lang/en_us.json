@@ -264,7 +264,7 @@
   "designandbuild.orientation.flip": "Opposite face",
   "designandbuild.orientation.flip_half": "Flip up/down (F)",
   "designandbuild.orientation.hidden_face": "Face: %s (hidden side)",
-  "designandbuild.orientation.hint": "Click a face to attach to · drag to look around",
+  "designandbuild.orientation.hint": "Click: face · dashed = back faces · drag: orbit",
   "designandbuild.orientation.look_dir": "Look %s",
   "designandbuild.orientation.lower": "Lower half",
   "designandbuild.orientation.no_material": "No material",
