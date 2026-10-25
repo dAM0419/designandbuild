@@ -171,6 +171,7 @@ public final class EditorScreen extends Screen {
         super.removed();
         Net.toServer(Msg.C_CLOSE_EDITOR, buf -> {});
         preview.close();
+        ViewportRenderer.release();
         if (ClientStore.editor == s) {
             s.dispose();
             ClientStore.editor = null;

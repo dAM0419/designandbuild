@@ -118,13 +118,7 @@ public final class StateRules {
     private static final int MAX_STEPS = 4;
 
     /** 가공 방법: 도구별 사용 횟수. */
-    public record Conversion(int[] uses) {
-        public int mainTool() {
-            int best = 0;
-            for (int t = 1; t < uses.length; t++) if (uses[t] > uses[best]) best = t;
-            return best;
-        }
-    }
+    public record Conversion(int[] uses) {}
 
     private record Key(BlockState world, BlockState target) {}
 

@@ -35,7 +35,17 @@ public final class ProjectionManager {
     private static UUID subscribed;
     @Nullable
     private static Projection active;
-    private static final Map<UUID, Projection> CACHE = new HashMap<>();
+    /** 최근에 든 도면의 투영 (다시 들면 비교를 처음부터 하지 않게). 오래된 것은 버리고 도면 변경 알림도 끊는다. */
+    private static final int CACHE_MAX = 3;
+    private static final Map<UUID, Projection> CACHE = new java.util.LinkedHashMap<>(8, 0.75F, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<UUID, Projection> eldest) {
+            if (size() <= CACHE_MAX) return false;
+            if (eldest.getValue() == active) return false;
+            eldest.getValue().detach();
+            return true;
+        }
+    };
     private static int tick;
     private static int rebuildCooldown;
     private static int materialsAge = 999;
@@ -64,9 +74,14 @@ public final class ProjectionManager {
     /** 겨눈 칸에 망치로 놓을 수 없으면 그 이유 (조준점 아래에 띄운다). 놓을 수 있으면 null. */
     @Nullable
     public static net.minecraft.network.chat.Component hammerHint;
-    /** 서버에 마지막으로 보낸 보기 상태 (같으면 다시 안 보냄). */
+    /** 서버에 마지막으로 보낸 보기 상태 (같으면 다시 안 보냄). sentViewValid = false 면 아직 안 보냄. */
+    private static boolean sentViewValid, sentViewOn;
     @Nullable
-    private static String sentView;
+    private static UUID sentViewId;
+    private static final int[] sentViewKey = new int[4];
+    /** 조준 이유 문구를 만든 판정 (같은 판정이면 문구를 다시 만들지 않는다). */
+    @Nullable
+    private static dev.designandbuild.core.PlaceCheck.Result hintFor;
 
     /** 도면별 즉시 반영 상태 (서버가 알려 줌). */
     public record InstantState(boolean allowed, boolean running, boolean hasUndo, int undoKind, int undoStructure) {}
@@ -76,7 +91,8 @@ public final class ProjectionManager {
     public static void reset() {
         hammerTarget = null;
         hammerHint = null;
-        sentView = null;
+        hintFor = null;
+        sentViewValid = false;
         INSTANT.clear();
         subscribed = null;
         active = null;
@@ -85,10 +101,6 @@ public final class ProjectionManager {
         ProjectionRenderer.clear();
         layerMaterials = List.of();
         stageMaterials = List.of();
-    }
-
-    public static void onModelChanged(BlueprintModel m) {
-        // 버전·리비전으로 다음 틱에 바뀐 칸만 고친다. 재료 목록은 정해진 주기로 다시 센다
     }
 
     public static void onModelReplaced(BlueprintModel m) {
@@ -184,7 +196,7 @@ public final class ProjectionManager {
         hammerTarget = player.getMainHandItem().is(Registration.HAMMER.get())
                 ? p.pickPlaceable(level, player.getEyePosition(), player.getViewVector(1.0F), player.blockInteractionRange())
                 : null;
-        hammerHint = hammerTarget == null ? null : hammerHint(p, level, hammerTarget);
+        updateHammerHint(p, level);
         ProjectionRenderer.update(p);
         if (++materialsAge >= 10) {
             materialsAge = 0;
@@ -198,38 +210,50 @@ public final class ProjectionManager {
     }
 
     /** 서버와 같은 판정으로 겨눈 칸을 미리 본다 (재료·보호 구역은 서버만 안다). */
-    @Nullable
-    private static net.minecraft.network.chat.Component hammerHint(Projection p, net.minecraft.client.multiplayer.ClientLevel level,
-                                                                  net.minecraft.core.BlockPos pos) {
+    private static void updateHammerHint(Projection p, ClientLevel level) {
+        if (hammerTarget == null) {
+            hammerHint = null;
+            hintFor = null;
+            return;
+        }
         int[] k = p.currentStageKey();
-        dev.designandbuild.core.PlaceCheck.Result r = dev.designandbuild.core.PlaceCheck.check(p.model, level, pos, k[0], k[1],
+        dev.designandbuild.core.PlaceCheck.Result r = dev.designandbuild.core.PlaceCheck.check(p.model, level, hammerTarget, k[0], k[1],
                 p.layerMode(), p.currentLayer(), p.currentStage() == Projection.STAGE_DEMOLISH);
-        return r.ok() ? null : HammerText.describe(r);
+        if (r.ok()) {
+            hammerHint = null;
+            hintFor = null;
+        } else if (!r.equals(hintFor)) {
+            hintFor = r;
+            hammerHint = HammerText.describe(r);
+        }
     }
 
     /** 보는 단계·층이 바뀌면 서버에 알린다 (건설망치 판정용). */
     private static void sendView(@Nullable Projection p) {
-        String key;
-        if (p == null || !p.isReady()) {
-            key = "-";
-        } else {
-            int[] k = p.currentStageKey();
-            key = p.model.id + "|" + k[0] + "|" + k[1] + "|" + p.layerMode() + "|" + p.currentLayer();
-        }
-        if (key.equals(sentView)) return;
-        if (sentView == null && key.equals("-")) {
-            sentView = key;
+        boolean on = p != null && p.isReady();
+        int[] k = on ? p.currentStageKey() : null;
+        int mode = on ? p.layerMode() : 0, y = on ? p.currentLayer() : 0;
+        UUID id = on ? p.model.id : null;
+        if (!sentViewValid) {
+            sentViewValid = true;
+            if (!on) { // 처음부터 꺼져 있으면 알릴 것이 없다
+                sentViewOn = false;
+                return;
+            }
+        } else if (on == sentViewOn && (!on || (id.equals(sentViewId) && k[0] == sentViewKey[0] && k[1] == sentViewKey[1]
+                && mode == sentViewKey[2] && y == sentViewKey[3]))) {
             return;
         }
-        sentView = key;
-        if (p == null || !p.isReady()) {
+        sentViewOn = on;
+        if (!on) {
             Net.toServer(Msg.C_VIEW_STATE, b -> b.writeBoolean(false));
             return;
         }
-        int[] k = p.currentStageKey();
-        UUID id = p.model.id;
-        int mode = p.layerMode();
-        int y = p.currentLayer();
+        sentViewId = id;
+        sentViewKey[0] = k[0];
+        sentViewKey[1] = k[1];
+        sentViewKey[2] = mode;
+        sentViewKey[3] = y;
         boolean topDown = p.currentStage() == Projection.STAGE_DEMOLISH;
         Net.toServer(Msg.C_VIEW_STATE, b -> {
             b.writeBoolean(true);

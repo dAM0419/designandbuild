@@ -1,7 +1,6 @@
 package dev.designandbuild.client.editor;
 
 import dev.designandbuild.core.Resolved;
-import dev.designandbuild.core.TerrainCell;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
@@ -35,7 +34,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
 /**
@@ -64,6 +62,28 @@ public final class PlacementStates {
         Minecraft mc = Minecraft.getInstance();
         Level level = mc.level;
         if (level == null) return block.defaultBlockState();
+        // 같은 재료·입력이면 결과도 같다 (빈 하늘 높이에서 계산하므로 자리와 무관). 화면마다 여러 번 묻는다
+        if (level != cacheLevel || CACHE.size() > 4096) {
+            CACHE.clear();
+            cacheLevel = level;
+        }
+        Key key = new Key(blockItem, stack.getComponentsPatch(), lookH, lookV, face, upper);
+        BlockState cached = CACHE.get(key);
+        if (cached != null) return cached;
+        BlockState computed = compute(stack, blockItem, block, level, mc, lookH, lookV, face, upper);
+        CACHE.put(key, computed);
+        return computed;
+    }
+
+    private record Key(BlockItem item, net.minecraft.core.component.DataComponentPatch components, Direction lookH, int lookV,
+                       Direction face, boolean upper) {}
+
+    private static final java.util.Map<Key, BlockState> CACHE = new java.util.HashMap<>();
+    @Nullable
+    private static Level cacheLevel;
+
+    private static BlockState compute(ItemStack stack, BlockItem blockItem, Block block, Level level, Minecraft mc,
+                                      Direction lookH, int lookV, Direction face, boolean upper) {
         int px = mc.player == null ? 0 : mc.player.getBlockX();
         int pz = mc.player == null ? 0 : mc.player.getBlockZ();
         BlockPos target = new BlockPos(px, level.getMaxBuildHeight() - 3, pz);
@@ -94,13 +114,22 @@ public final class PlacementStates {
         return state;
     }
 
+    /** StandingAndWallBlockItem.wallBlock (비공개). 한 번만 찾는다. */
+    @Nullable
+    private static Field wallField;
+    private static boolean wallFieldLooked;
+
     @Nullable
     private static Block wallBlockOf(BlockItem item) {
         if (!(item instanceof StandingAndWallBlockItem)) return null;
         try {
-            Field f = StandingAndWallBlockItem.class.getDeclaredField("wallBlock");
-            f.setAccessible(true);
-            return (Block) f.get(item);
+            if (!wallFieldLooked) {
+                wallFieldLooked = true;
+                Field f = StandingAndWallBlockItem.class.getDeclaredField("wallBlock");
+                f.setAccessible(true);
+                wallField = f;
+            }
+            return wallField == null ? null : (Block) wallField.get(item);
         } catch (Exception e) {
             return null;
         }

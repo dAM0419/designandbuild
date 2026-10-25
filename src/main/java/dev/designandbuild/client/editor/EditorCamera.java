@@ -93,10 +93,6 @@ public final class EditorCamera {
         return targetPitch;
     }
 
-    public boolean animating() {
-        return progress() < 1.0F;
-    }
-
     /** 방위각 yaw 에서 내려다볼 때, 목표점에서 카메라 쪽을 가리키는 단위 벡터. */
     public static Vector3f toCamera(float yaw, float pitch) {
         double y = Math.toRadians(yaw), p = Math.toRadians(pitch);

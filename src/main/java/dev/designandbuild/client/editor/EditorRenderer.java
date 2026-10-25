@@ -56,6 +56,9 @@ public final class EditorRenderer implements AutoCloseable {
         VertexBuffer lowerEdges;
         VertexBuffer upperEdges;
         int cutStamp = -1;
+        /** 단면 분류와 그것을 정한 단면 설정 번호 (그릴 때마다 다시 따지지 않게). */
+        CutClass cls = CutClass.UNCUT;
+        int clsStamp = Integer.MIN_VALUE;
 
         Entry(long key) {
             this.key = key;
@@ -204,7 +207,7 @@ public final class EditorRenderer implements AutoCloseable {
         for (Entry e : entries.values()) {
             if (System.nanoTime() >= deadline) break;
             if (e.cutStamp == s.cutStamp) continue;
-            if (classify(e.key) != CutClass.MIXED) {
+            if (classify(e) != CutClass.MIXED) {
                 e.closeCut();
                 e.cutStamp = s.cutStamp;
                 continue;
@@ -226,8 +229,16 @@ public final class EditorRenderer implements AutoCloseable {
     private List<Box> regionsCache = List.of();
     private int regionsStamp = -1;
 
-    private CutClass classify(long key) {
+    private CutClass classify(Entry e) {
         if (!s.cutActive) return CutClass.UNCUT;
+        if (e.clsStamp != s.cutStamp) {
+            e.cls = classify(e.key);
+            e.clsStamp = s.cutStamp;
+        }
+        return e.cls;
+    }
+
+    private CutClass classify(long key) {
         if (regionsStamp != s.cutStamp) {
             regionsCache = s.cutRegions();
             regionsStamp = s.cutStamp;
@@ -255,6 +266,7 @@ public final class EditorRenderer implements AutoCloseable {
         List<Entry> visible = new ArrayList<>();
         List<BlockMesher.Mesh> meshes = new ArrayList<>();
         Matrix4f pv = new Matrix4f(projection).mul(rotation);
+        Vector4f v = new Vector4f();
         float margin = 16.0F * s.camera.scale / Math.max(1, Math.min(s.camera.width(), s.camera.height())) * 2.2F;
         for (Long2ObjectMap.Entry<Entry> me : entries.long2ObjectEntrySet()) {
             Entry e = me.getValue();
@@ -264,7 +276,7 @@ public final class EditorRenderer implements AutoCloseable {
             float cx = (float) ((SectionPos.x(key) << 4) + 8 - s.camera.tx);
             float cy = (float) ((SectionPos.y(key) << 4) + 8 - s.camera.ty);
             float cz = (float) ((SectionPos.z(key) << 4) + 8 - s.camera.tz);
-            Vector4f v = pv.transform(new Vector4f(cx, cy, cz, 1.0F));
+            pv.transform(v.set(cx, cy, cz, 1.0F));
             if (Math.abs(v.x) > 1 + margin || Math.abs(v.y) > 1 + margin) continue;
             visible.add(e);
             meshes.add(mesh);
@@ -280,7 +292,7 @@ public final class EditorRenderer implements AutoCloseable {
                     begun = true;
                 }
                 long key = visible.get(i).key;
-                Matrix4f mv = new Matrix4f(rotation).translate(
+                Matrix4f mv = scratch.set(rotation).translate(
                         (float) ((SectionPos.x(key) << 4) - s.camera.tx),
                         (float) ((SectionPos.y(key) << 4) - s.camera.ty),
                         (float) ((SectionPos.z(key) << 4) - s.camera.tz));
@@ -291,6 +303,9 @@ public final class EditorRenderer implements AutoCloseable {
         if (ClientConfig.get().blockOutlines) drawEdges(visible, pass, rotation, projection);
         drawDynamic(meshes, pass);
     }
+
+    /** 섹션마다 만드는 모델뷰 행렬 (그리기 호출이 곧바로 셰이더에 넘기므로 하나를 돌려 쓴다). */
+    private final Matrix4f scratch = new Matrix4f();
 
     /** 바닐라 선 셰이더가 뷰 좌표를 1/256 줄이는 것을 되돌린다 (원근 화면용 보정이라 직교 화면에선 선이 어긋난다). */
     private static final float VIEW_SHRINK = 1.0F - 1.0F / 256.0F;
@@ -320,7 +335,7 @@ public final class EditorRenderer implements AutoCloseable {
                 begun = true;
             }
             long key = e.key;
-            Matrix4f mv = new Matrix4f(view).translate(
+            Matrix4f mv = scratch.set(view).translate(
                     (float) ((SectionPos.x(key) << 4) - s.camera.tx),
                     (float) ((SectionPos.y(key) << 4) - s.camera.ty),
                     (float) ((SectionPos.z(key) << 4) - s.camera.tz));
@@ -341,7 +356,7 @@ public final class EditorRenderer implements AutoCloseable {
 
     private VertexBuffer pickEdges(Entry e, Pass pass) {
         if (pass == Pass.FULL || !s.cutActive) return pass == Pass.UPPER ? null : e.fullEdges;
-        CutClass c = classify(e.key);
+        CutClass c = classify(e);
         return switch (pass) {
             case LOWER -> c == CutClass.UNCUT ? e.fullEdges : c == CutClass.FULL_CUT ? null
                     : (e.lower != null ? e.lowerEdges : e.fullEdges);
@@ -352,7 +367,7 @@ public final class EditorRenderer implements AutoCloseable {
 
     private BlockMesher.Mesh pick(Entry e, Pass pass) {
         if (pass == Pass.FULL || !s.cutActive) return pass == Pass.UPPER ? null : e.full;
-        CutClass c = classify(e.key);
+        CutClass c = classify(e);
         return switch (pass) {
             case LOWER -> c == CutClass.UNCUT ? e.full : c == CutClass.FULL_CUT ? null : (e.lower != null ? e.lower : e.full);
             case UPPER -> c == CutClass.UNCUT ? null : c == CutClass.FULL_CUT ? e.full : e.upper;

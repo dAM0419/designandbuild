@@ -101,6 +101,9 @@ public final class BuildService {
     private interface Job {
         /** @return 끝났으면 true */
         boolean tick(MinecraftServer server);
+
+        /** 오류로 중단될 때: 잡아 둔 것(강제 로드 청크, 진행 중 표시)을 푼다. */
+        default void abort() {}
     }
 
     private static final List<Job> JOBS = new ArrayList<>();
@@ -114,6 +117,10 @@ public final class BuildService {
                 done = j.tick(server);
             } catch (Exception e) {
                 DesignAndBuild.LOGGER.error("DesignAndBuild build job failed", e);
+                try {
+                    j.abort();
+                } catch (Exception ignored) {
+                }
                 done = true;
             }
             if (done) it.remove();
@@ -311,6 +318,12 @@ public final class BuildService {
         }
 
         @Override
+        public void abort() {
+            hold.release();
+            RUNNING.remove(model.id);
+        }
+
+        @Override
         public boolean tick(MinecraftServer server) {
             BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
             if (index < pos.length) {
@@ -364,6 +377,12 @@ public final class BuildService {
             LongOpenHashSet chunks = new LongOpenHashSet();
             for (long p : undo.pos) chunks.add(ChunkPos.asLong(BlockPos.getX(p) >> 4, BlockPos.getZ(p) >> 4));
             this.hold = new ChunkHold(level, chunks);
+        }
+
+        @Override
+        public void abort() {
+            hold.release();
+            RUNNING.remove(undo.blueprint);
         }
 
         @Override

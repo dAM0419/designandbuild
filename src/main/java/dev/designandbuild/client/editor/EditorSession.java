@@ -30,7 +30,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -215,43 +214,37 @@ public final class EditorSession {
      * 숨기는 쪽: 축의 + 방향이면 1, - 방향이면 -1. Y는 언제나 위, X·Z는 카메라가 있는 쪽.
      * 정면으로 볼 때처럼 카메라가 그 축과 수직이면 어느 쪽인지 알 수 없으므로 직전 값을 쓴다.
      */
-    public int cutSign() {
-        return cutSign(cutAxis);
-    }
-
     public int cutSign(Direction.Axis axis) {
+        if (axis == Direction.Axis.Y) return 1;
         org.joml.Vector3f c = camera.toCamera();
-        return switch (axis) {
-            case Y -> 1;
-            case X -> {
-                if (Math.abs(c.x) > 0.05F) lastCutSignX = c.x > 0 ? 1 : -1;
-                yield lastCutSignX;
-            }
-            case Z -> {
-                if (Math.abs(c.z) > 0.05F) lastCutSignZ = c.z > 0 ? 1 : -1;
-                yield lastCutSignZ;
-            }
-        };
+        int sign;
+        if (axis == Direction.Axis.X) {
+            if (Math.abs(c.x) > 0.05F) lastCutSignX = c.x > 0 ? 1 : -1;
+            sign = lastCutSignX;
+        } else {
+            if (Math.abs(c.z) > 0.05F) lastCutSignZ = c.z > 0 ? 1 : -1;
+            sign = lastCutSignZ;
+        }
+        cutSigns[axis.ordinal()] = sign;
+        return sign;
     }
 
-    /** 지금 조작하는 축의 단면 위치. */
-    public int cutPos() {
-        return cutAt[cutAxis.ordinal()];
-    }
+    /**
+     * 칸 판정({@link #isCut})용 숨김 방향 (축 순서 X, Y, Z). isCut 은 메시를 구울 때 칸마다 불리므로
+     * 카메라 계산을 하지 않고 이 값을 쓴다. {@link #checkCutChanged} 가 매 프레임 새로 정한다.
+     */
+    private final int[] cutSigns = {1, 1, -1};
 
-    /** 켜진 축이 하나라도 있는 단면 보기인가. */
-    public boolean cutting() {
-        return cutActive && (cutOn[0] || cutOn[1] || cutOn[2]);
-    }
+    private static final Direction.Axis[] AXES = Direction.Axis.values();
 
     public boolean isCut(int x, int y, int z) {
         if (!cutActive) return false;
         boolean hidden = false;
-        for (Direction.Axis ax : Direction.Axis.values()) {
+        for (Direction.Axis ax : AXES) {
             int i = ax.ordinal();
             if (!cutOn[i]) continue;
             int c = ax == Direction.Axis.X ? x : ax == Direction.Axis.Y ? y : z;
-            int d = (c - cutAt[i]) * cutSign(ax);
+            int d = (c - cutAt[i]) * cutSigns[i];
             if (d > 0 || (d < 0 && cutOnlyLayer)) {
                 hidden = true;
                 break;
@@ -294,11 +287,6 @@ public final class EditorSession {
         a[axis] = lo;
         b[axis] = hi;
         out.add(new Box(a[0], a[1], a[2], b[0], b[1], b[2]));
-    }
-
-    /** 지금 조작하는 축의 범위 [최소, 최대] (슬라이더용). */
-    public int[] cutRange() {
-        return cutRange(cutAxis);
     }
 
     /** 축 방향 범위 [최소, 최대] (슬라이더용). Y는 실제 블록이 있는 높이까지만. */

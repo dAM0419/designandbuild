@@ -3,7 +3,6 @@ package dev.designandbuild.client.editor.ui;
 import dev.designandbuild.client.ClientConfig;
 import dev.designandbuild.client.editor.EditorScreen;
 import dev.designandbuild.client.editor.EditorSession;
-import dev.designandbuild.client.ui.Icons;
 import dev.designandbuild.client.ui.Ui;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;

@@ -34,7 +34,6 @@ import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
@@ -48,18 +47,20 @@ import java.util.List;
  * 월드 투영 그리기. 구역(16³)마다 유령 블록·외곽선·필터를 구워 두고, 바뀐 구역만 다시 굽는다.
  * <pre>
  * 놓아야 할 블록   실제 텍스처 색 그대로. 투영 전체를 별도 버퍼에 불투명하게 그린 뒤 통째로 반투명하게 덮는다
- *                 (블록마다 반투명이면 겹친 면이 비쳐 지저분하다). 셰이더 팩이 켜져 있으면 블록별 반투명으로 대신한다.
+ *                 (블록마다 반투명이면 겹친 면이 비쳐 지저분하다). 셰이더 팩은 지원하지 않는다.
  * 철거할 블록      희미한 빨간 필터 (액체 원천은 청색 "메우기")
  * 방향이 틀림      주황 외곽선
  * 다른 블록이 놓임  빨간 필터 (철거와 같다)
- * 망치 조준        흰 외곽선
+ * 가공할 블록      청록 외곽선
+ * 놓을 수 없음      유령 + 보라 외곽선 (받침이 생길 수 없는 설계)
+ * 망치 조준        흰 외곽선 (못 놓는 칸이면 빨강)
  * </pre>
  * 상태 표시는 합성 뒤에 따로 그려 반투명 덮개에 섞이지 않게 한다.
  */
 public final class ProjectionRenderer {
     private ProjectionRenderer() {}
 
-    /** 셰이더 팩 대체 경로의 블록별 불투명도는 설정값을 그대로 쓴다. */
+    /** 이보다 먼 구역은 그리지 않는다. */
     private static final double MAX_DISTANCE = 192;
     /** 한 틱에 구울 칸 수 상한 (프레임이 튀지 않게 나눠 굽는다). */
     private static final int BUILD_BUDGET = 3000;
@@ -77,10 +78,15 @@ public final class ProjectionRenderer {
         @Nullable
         VertexBuffer quads;
 
+        final AABB box;
+        /** 이 프레임의 모델뷰 (구역 원점 기준). */
+        final Matrix4f mv = new Matrix4f();
+
         SectionVisual(int ox, int oy, int oz) {
             this.ox = ox;
             this.oy = oy;
             this.oz = oz;
+            this.box = new AABB(ox, oy, oz, ox + 16, oy + 16, oz + 16);
         }
 
         boolean isEmpty() {
@@ -115,6 +121,11 @@ public final class ProjectionRenderer {
         QUEUE.clear();
         QUEUED.clear();
         owner = null;
+        // 화면 크기 합성 버퍼는 투영을 다시 그릴 때 만든다 (들고 있지 않을 때 그래픽 메모리를 쥐고 있지 않게)
+        if (ghostTarget != null) {
+            ghostTarget.destroyBuffers();
+            ghostTarget = null;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -290,7 +301,9 @@ public final class ProjectionRenderer {
             SectionVisual v = e.getValue();
             double cx = v.ox + 8 - cam.x, cy = v.oy + 8 - cam.y, cz = v.oz + 8 - cam.z;
             if (cx * cx + cy * cy + cz * cz > MAX_DISTANCE * MAX_DISTANCE) continue;
-            if (frustum != null && !frustum.isVisible(new AABB(v.ox, v.oy, v.oz, v.ox + 16, v.oy + 16, v.oz + 16))) continue;
+            if (frustum != null && !frustum.isVisible(v.box)) continue;
+            // 이 프레임의 구역 변환 (여러 번 그리므로 한 번만 만든다)
+            v.mv.set(view).translate((float) (v.ox - cam.x), (float) (v.oy - cam.y), (float) (v.oz - cam.z));
             visible.add(v);
         }
         BlockPos target = ProjectionManager.hammerTarget;
@@ -342,7 +355,7 @@ public final class ProjectionRenderer {
                     MeshDraw.beginLayer(type, true);
                     begun = true;
                 }
-                MeshDraw.draw(v.ghost.buffers[layer], offset(view, v, cam), proj);
+                MeshDraw.draw(v.ghost.buffers[layer], v.mv, proj);
             }
             if (begun) MeshDraw.endLayer(type);
         }
@@ -408,30 +421,28 @@ public final class ProjectionRenderer {
     // 망치 조준 상자
     // ------------------------------------------------------------------
 
-    @Nullable
-    private static VertexBuffer targetBuffer;
-    private static final ByteBufferBuilder TARGET_MEMORY = new ByteBufferBuilder(2048);
+    /** 조준 상자 (흰색 = 놓을 수 있음, 빨강 = 못 놓음). 모양이 늘 같아 한 번 구워 둔다. */
+    private static final VertexBuffer[] TARGET_BOX = new VertexBuffer[2];
 
     private static void drawTargetBox(BlockPos p, Matrix4f view, Matrix4f proj, Vec3 cam) {
-        BufferBuilder b = new BufferBuilder(TARGET_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
-        lineBox(b, -0.002F, -0.002F, -0.002F, 1.002F, 1.002F, 1.002F, ProjectionManager.hammerHint != null ? 0xF0FF5050 : 0xF0FFFFFF);
-        MeshData data = b.build();
-        if (data == null) return;
-        if (targetBuffer == null) targetBuffer = new VertexBuffer(VertexBuffer.Usage.DYNAMIC);
-        targetBuffer.bind();
-        targetBuffer.upload(data);
+        int which = ProjectionManager.hammerHint != null ? 1 : 0;
+        VertexBuffer vb = TARGET_BOX[which];
+        if (vb == null) {
+            BufferBuilder b = new BufferBuilder(LINE_MEMORY, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
+            lineBox(b, -0.002F, -0.002F, -0.002F, 1.002F, 1.002F, 1.002F, which == 1 ? 0xF0FF5050 : 0xF0FFFFFF);
+            vb = upload(b.build());
+            if (vb == null) return;
+            TARGET_BOX[which] = vb;
+        }
         DabRenderTypes.LINES.setupRenderState();
         ShaderInstance shader = RenderSystem.getShader();
         if (shader != null) {
             Matrix4f mv = new Matrix4f(view).translate((float) (p.getX() - cam.x), (float) (p.getY() - cam.y), (float) (p.getZ() - cam.z));
-            targetBuffer.drawWithShader(mv, proj, shader);
+            vb.bind();
+            vb.drawWithShader(mv, proj, shader);
+            VertexBuffer.unbind();
         }
-        VertexBuffer.unbind();
         DabRenderTypes.LINES.clearRenderState();
-    }
-
-    private static Matrix4f offset(Matrix4f view, SectionVisual v, Vec3 cam) {
-        return new Matrix4f(view).translate((float) (v.ox - cam.x), (float) (v.oy - cam.y), (float) (v.oz - cam.z));
     }
 
     private static void drawBuffers(RenderType type, List<SectionVisual> visible, Matrix4f view, Matrix4f proj, Vec3 cam,
@@ -443,7 +454,7 @@ public final class ProjectionRenderer {
                 VertexBuffer vb = which == 0 ? v.lines : v.quads;
                 if (vb == null) continue;
                 vb.bind();
-                vb.drawWithShader(offset(view, v, cam), proj, shader);
+                vb.drawWithShader(v.mv, proj, shader);
             }
             VertexBuffer.unbind();
         }

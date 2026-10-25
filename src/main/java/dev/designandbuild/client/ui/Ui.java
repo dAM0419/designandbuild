@@ -27,9 +27,7 @@ public final class Ui {
     public static final int PANEL = 0xD9101418;
     public static final int PANEL_SOLID = 0xF2101418;
     public static final int EDGE = 0xFF39424E;
-    public static final int EDGE_LIGHT = 0x20FFFFFF;
     public static final int HOVER = 0x28FFFFFF;
-    public static final int PRESSED = 0x40FFFFFF;
     public static final int TEXT = 0xFFE6E9EE;
     public static final int DIM = 0xFF96A0AB;
     public static final int DISABLED = 0xFF5A626C;
@@ -46,7 +44,6 @@ public final class Ui {
     public static final int FILL_WATER = 0xFF4FA3E0;
     /** 도면 테마 (상단 바·테이블). */
     public static final int BLUEPRINT = 0xF01E3F66;
-    public static final int BLUEPRINT_LINE = 0x40FFFFFF;
 
     public static Font font() {
         return Minecraft.getInstance().font;

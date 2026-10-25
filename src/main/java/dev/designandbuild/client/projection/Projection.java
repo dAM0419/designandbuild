@@ -117,7 +117,8 @@ public final class Projection {
     // ---- 평가 ----
     private int cursor;
     boolean firstPassDone;
-    private int passCount;
+    /** 평가용 위치 (클라이언트 틱 스레드에서만 쓴다). */
+    private final BlockPos.MutableBlockPos evalPos = new BlockPos.MutableBlockPos(), nearPos = new BlockPos.MutableBlockPos();
 
     // ---- 진행 ----
     int cur;
@@ -212,11 +213,10 @@ public final class Projection {
         List<StructureInstance> ordered = model.orderedStructures();
         structIds = new int[ordered.size()];
         structNames = new String[ordered.size()];
-        Map<Integer, Integer> stageOfStructure = new HashMap<>();
+        Int2IntOpenHashMap stageOfStructure = stageMap(ordered);
         for (int i = 0; i < ordered.size(); i++) {
             structIds[i] = ordered.get(i).id;
             structNames[i] = ordered.get(i).name;
-            stageOfStructure.put(ordered.get(i).id, STAGE_STRUCTURES + i);
         }
         stageCount = STAGE_STRUCTURES + structIds.length;
 
@@ -240,21 +240,10 @@ public final class Projection {
             Resolved r = e.getValue();
             np[k] = p;
             nt[k] = r.state();
-            int st;
-            if (r.isAir()) {
-                st = STAGE_DEMOLISH;
-            } else if (r.tag() == DesignTag.PATH) {
-                st = STAGE_PATH;
-            } else if (r.tag() == DesignTag.STRUCTURE && r.owner() != 0 && stageOfStructure.containsKey(r.owner())) {
-                st = stageOfStructure.get(r.owner());
-            } else {
-                st = STAGE_FLOOR;
-            }
-            ns[k] = st;
+            ns[k] = stageFor(r, stageOfStructure);
             int oi = old.get(p);
             nst[k] = oi >= 0 && oldTarget[oi] == r.state() ? oldStatus[oi] : UNKNOWN;
-            long sec = SectionPos.asLong(BlockPos.getX(p) >> 4, BlockPos.getY(p) >> 4, BlockPos.getZ(p) >> 4);
-            sections.computeIfAbsent(sec, q -> new IntArrayList()).add(k);
+            sections.computeIfAbsent(sectionOf(p), q -> new IntArrayList()).add(k);
             k++;
         }
         Long2IntOpenHashMap idx = new Long2IntOpenHashMap(size);
@@ -295,7 +284,15 @@ public final class Projection {
     // 증분 반영 (다른 사람이 편집 중일 때 전체를 다시 만들지 않는다)
     // ------------------------------------------------------------------
 
-    private int stageFor(Resolved r, it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap stageOf) {
+    /** 구조물 ID → 단계 번호 (없으면 -1). */
+    private static Int2IntOpenHashMap stageMap(List<StructureInstance> ordered) {
+        Int2IntOpenHashMap m = new Int2IntOpenHashMap();
+        m.defaultReturnValue(-1);
+        for (int i = 0; i < ordered.size(); i++) m.put(ordered.get(i).id, STAGE_STRUCTURES + i);
+        return m;
+    }
+
+    private static int stageFor(Resolved r, Int2IntOpenHashMap stageOf) {
         if (r.isAir()) return STAGE_DEMOLISH;
         if (r.tag() == DesignTag.PATH) return STAGE_PATH;
         if (r.tag() == DesignTag.STRUCTURE && r.owner() != 0) {
@@ -308,12 +305,8 @@ public final class Projection {
     private void patch(ClientLevel level) {
         builtRevision = model.revision();
         List<StructureInstance> ordered = model.orderedStructures();
-        it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap stageOf = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
-        stageOf.defaultReturnValue(-1);
-        for (int i = 0; i < ordered.size(); i++) {
-            structNames[i] = ordered.get(i).name;
-            stageOf.put(ordered.get(i).id, STAGE_STRUCTURES + i);
-        }
+        Int2IntOpenHashMap stageOf = stageMap(ordered);
+        for (int i = 0; i < ordered.size(); i++) structNames[i] = ordered.get(i).name;
         it.unimi.dsi.fastutil.longs.LongIterator it = changed.iterator();
         while (it.hasNext()) {
             long p = it.nextLong();
@@ -485,25 +478,7 @@ public final class Projection {
         demolishLayer.clear();
         demolishCount = 0;
         unknownCount = 0;
-        for (int i = 0; i < n; i++) {
-            int s = stage[i];
-            int y = BlockPos.getY(pos[i]);
-            byte st = status[i];
-            if (s != STAGE_DEMOLISH) {
-                total[s]++;
-                if (st == UNKNOWN) {
-                    unknownBy[s]++;
-                } else if (st != DONE) {
-                    remaining[s]++;
-                    layerRemaining[s].addTo(layerY(i), 1);
-                }
-            }
-            if (st == DEMOLISH || st == FILL) {
-                demolishCount++;
-                demolishLayer.addTo(y, 1);
-            }
-            if (st == UNKNOWN) unknownCount++;
-        }
+        for (int i = 0; i < n; i++) countCell(i, 1);
     }
 
     // ------------------------------------------------------------------
@@ -514,14 +489,14 @@ public final class Projection {
         long p = pos[i];
         int x = BlockPos.getX(p), y = BlockPos.getY(p), z = BlockPos.getZ(p);
         if (!level.hasChunk(x >> 4, z >> 4)) return UNKNOWN;
-        BlockState world = level.getBlockState(new BlockPos(x, y, z));
+        BlockState world = level.getBlockState(evalPos.set(x, y, z));
         BlockState t = target[i];
         if (StateRules.matches(world, t)) return DONE;
         if (StateRules.needsDemolish(level, world, t)) return StateRules.isFillTarget(world) ? FILL : DEMOLISH;
         if (t.isAir()) return DONE;
         if (StateRules.sameBlockWrongState(world, t)) return WRONG;
         if (StateRules.conversion(level, world, t) != null) return CONVERT;
-        int sup = support(level, i, x, y, z);
+        int sup = support(level, i, evalPos.immutable()); // 버팀 검사에는 고정 위치를 넘긴다 (블록이 위치를 붙잡아 둘 수 있다)
         return sup == 1 ? WAIT : sup == 2 ? INVALID : PLACE;
     }
 
@@ -529,16 +504,15 @@ public final class Projection {
      * 받침 상태: 0 = 버틴다, 1 = 받침이 될 이웃이 아직 안 지은 설계 칸이라 기다린다 (투영에 안 보이고 남은 칸으로는 센다),
      * 2 = 받침이 생길 수 없다 (이웃이 설계 칸이 아니거나 지어도 못 받침) → 놓을 수 없는 칸 (보라 외곽선).
      */
-    private int support(ClientLevel level, int i, int x, int y, int z) {
+    private int support(ClientLevel level, int i, BlockPos p) {
         BlockState t = target[i];
-        BlockPos p = new BlockPos(x, y, z);
         try {
             if (t.canSurvive(level, p)) return 0;
         } catch (Exception e) {
             return 0;
         }
-        BlockPos.MutableBlockPos q = new BlockPos.MutableBlockPos();
-        for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+        BlockPos.MutableBlockPos q = nearPos;
+        for (net.minecraft.core.Direction d : DIRECTIONS) {
             q.setWithOffset(p, d);
             int j = index.get(q.asLong());
             if (j < 0 || target[j].isAir()) continue;
@@ -546,6 +520,8 @@ public final class Projection {
         }
         return 2;
     }
+
+    private static final net.minecraft.core.Direction[] DIRECTIONS = net.minecraft.core.Direction.values();
 
     private void setStatus(int i, byte ns) {
         byte old = status[i];
@@ -585,18 +561,11 @@ public final class Projection {
         }
         int count = Math.min(budget, n);
         for (int k = 0; k < count; k++) {
-            if (cursor >= n) {
+            setStatus(cursor, evaluate(level, cursor));
+            if (++cursor >= n) {
                 cursor = 0;
-                passCount++;
                 firstPassDone = true;
             }
-            setStatus(cursor, evaluate(level, cursor));
-            cursor++;
-        }
-        if (cursor >= n) {
-            cursor = 0;
-            passCount++;
-            firstPassDone = true;
         }
     }
 
@@ -940,16 +909,16 @@ public final class Projection {
         return viewMode();
     }
 
-    /**
-     * 시선이 처음 닿는 "놓아야 할" 투영 칸. 실제 블록(부딪히는 것)에 먼저 막히면 없음.
-     * 철거 단계에서는 놓을 칸이 없으니 언제나 없음.
-     */
-    @org.jetbrains.annotations.Nullable
     /** 망치로 겨눌 수 있는 상태: 놓을 칸, 그리고 이유를 알려 줄 칸(놓을 수 없음·방향 틀림·가공). */
     private static boolean aimable(byte st) {
         return st == PLACE || st == INVALID || st == WRONG || st == CONVERT;
     }
 
+    /**
+     * 시선이 처음 닿는 망치 대상 투영 칸. 실제 블록(부딪히는 것)에 먼저 막히면 없음.
+     * 철거 단계에서는 놓을 칸이 없으니 언제나 없음.
+     */
+    @org.jetbrains.annotations.Nullable
     public BlockPos pickPlaceable(ClientLevel level, net.minecraft.world.phys.Vec3 from, net.minecraft.world.phys.Vec3 dir, double reach) {
         if (cur <= STAGE_DEMOLISH || cur >= stageCount || n == 0) return null;
         int x = net.minecraft.util.Mth.floor(from.x), y = net.minecraft.util.Mth.floor(from.y), z = net.minecraft.util.Mth.floor(from.z);

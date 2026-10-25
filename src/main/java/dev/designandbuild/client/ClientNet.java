@@ -210,7 +210,6 @@ public final class ClientNet {
         for (ModelOps.Op op : ops) op.apply(m);
         m.version = version;
         if (s != null && s.model == m) s.onApplied(actor, seq, ops);
-        ProjectionManager.onModelChanged(m);
     }
 
     /** 편집창이 열려 있으면 편집창 토스트, 아니면 핫바 위 알림. */

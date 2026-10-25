@@ -50,6 +50,13 @@ public final class ViewportRenderer {
     private static long tagKey = Long.MIN_VALUE;
     private static int tagOx, tagOy, tagOz;
 
+    /** 편집창을 닫을 때: 태그 보기 버퍼를 버린다 (다음 편집창의 다른 도면과 섞이지 않게). */
+    public static void release() {
+        if (tagBuffer != null) tagBuffer.close();
+        tagBuffer = null;
+        tagKey = Long.MIN_VALUE;
+    }
+
     public static void render(EditorScreen screen, GuiGraphics g, int mx, int my, float pt) {
         EditorSession s = screen.session();
         if (s.renderer == null) return;

@@ -8,7 +8,6 @@ import dev.designandbuild.core.Resolved;
 import dev.designandbuild.core.TemplateData;
 import dev.designandbuild.core.TerrainCell;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;

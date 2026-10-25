@@ -1,6 +1,5 @@
 package dev.designandbuild.client.editor.ui;
 
-import dev.designandbuild.client.ClientConfig;
 import dev.designandbuild.client.editor.EditorScreen;
 import dev.designandbuild.client.editor.EditorSession;
 import dev.designandbuild.client.editor.PlacementStates;
@@ -97,6 +96,7 @@ public final class OptionBar extends UiPart {
         s.sizeZ = size[2];
     }
 
+    /** 항목을 지금 상태로 다시 만들고 필요한 높이를 센다. 편집창이 매 프레임 그리기 전에 부른다. */
     public int requiredHeight(int width) {
         build();
         int x0 = 4, r = 1;
@@ -349,7 +349,7 @@ public final class OptionBar extends UiPart {
     public void render(GuiGraphics g, int mx, int my, float pt) {
         g.fill(x, y, x + w, y + h, Ui.PANEL);
         g.fill(x, y, x + w, y + 1, Ui.EDGE);
-        build();
+        // 항목은 이 프레임의 배치(requiredHeight, 그리기 직전에 부름)에서 이미 만들었다
         int cx = x + 4, cy = y, row = 0;
         for (Item it : items) {
             if (cx + it.w > x + w - 4 && cx > x + 4) {

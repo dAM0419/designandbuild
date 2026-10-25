@@ -129,9 +129,6 @@ public final class BlueprintManager {
     public void openEditor(ServerPlayer player, BlueprintModel m, BlockPos tablePos) {
         Session old = sessions.put(player.getUUID(), new Session(m.id, player.level().dimension(), tablePos.immutable()));
         if (old != null && !old.blueprint().equals(m.id)) broadcastEditors(old.blueprint());
-        ServerLevel level = server.getLevel(m.dimension);
-        if (level == null) level = player.serverLevel();
-        final ServerLevel snapLevel = level;
         Net.toPlayer(player, Msg.S_EDITOR_BEGIN, buf -> {
             buf.writeBlockPos(tablePos);
             ModelCodec.write(buf, m);
