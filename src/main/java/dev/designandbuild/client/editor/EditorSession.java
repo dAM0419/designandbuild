@@ -175,12 +175,32 @@ public final class EditorSession {
 
     private int lastIsolated;
 
-    /** 구조물 편집에 들어가거나 나오면 화면 전체를 다시 굽는다. 매 프레임 부른다. */
+    /** 구조물 편집에 들어가기 전의 카메라 목표점 (나오면 되돌린다). */
+    @Nullable
+    private double[] savedCameraTarget;
+
+    /**
+     * 구조물 편집에 들어가거나 나오면 화면 전체를 다시 굽는다. 매 프레임 부른다.
+     * 들어가면 카메라 목표점(회전 중심)을 그 구조물 가운데로 옮기고, 나오면 원래 자리로 되돌린다.
+     */
     public void checkIsolationChanged() {
         int iso = isolated();
         if (iso == lastIsolated) return;
         lastIsolated = iso;
         if (renderer != null) renderer.markAll();
+        StructureInstance st = iso != 0 ? model.structure(iso) : null;
+        if (st != null && st.bounds() != null) {
+            if (savedCameraTarget == null) savedCameraTarget = new double[]{camera.tx, camera.ty, camera.tz};
+            Box b = st.bounds();
+            camera.tx = (b.minX() + b.maxX() + 1) / 2.0;
+            camera.ty = (b.minY() + b.maxY() + 1) / 2.0;
+            camera.tz = (b.minZ() + b.maxZ() + 1) / 2.0;
+        } else if (iso == 0 && savedCameraTarget != null) {
+            camera.tx = savedCameraTarget[0];
+            camera.ty = savedCameraTarget[1];
+            camera.tz = savedCameraTarget[2];
+            savedCameraTarget = null;
+        }
     }
 
     /** 설계를 뺀 원래 월드 (스냅샷). */

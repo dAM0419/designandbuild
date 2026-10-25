@@ -497,9 +497,21 @@ public final class BuildService {
         BlockPos origin = start;
         Long[] boxed = new Long[cells.length];
         for (int i = 0; i < cells.length; i++) boxed[i] = cells[i];
+        // 층 = 설치하는 층 (매다는 블록은 받침 층). 같은 층에서는 받침이 먼저 필요한 블록(지금은 못 버티는 것)을 뒤로
+        it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap layerOf = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+        it.unimi.dsi.fastutil.longs.LongOpenHashSet later = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+        for (long c : cells) {
+            Resolved rc = m.resolved(c);
+            BlockState t = rc == null ? Blocks.AIR.defaultBlockState() : rc.state();
+            BlockPos cp = BlockPos.of(c);
+            layerOf.put(c, Stages.buildLayerY(t, cp.getY()));
+            if (Stages.hangsFromAbove(t) || !t.canSurvive(level, cp)) later.add(c);
+        }
         java.util.Arrays.sort(boxed, (a, b) -> {
-            int ya = BlockPos.getY(a), yb = BlockPos.getY(b);
+            int ya = layerOf.get((long) a), yb = layerOf.get((long) b);
             if (ya != yb) return Integer.compare(ya, yb);
+            boolean la = later.contains((long) a), lb = later.contains((long) b);
+            if (la != lb) return la ? 1 : -1;
             return Double.compare(BlockPos.of(a).distSqr(origin), BlockPos.of(b).distSqr(origin));
         });
         for (int i = 0; i < cells.length; i++) cells[i] = boxed[i];

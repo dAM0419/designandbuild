@@ -272,7 +272,11 @@ public final class EditorScreen extends Screen {
             }
         }
         if (tooltip != null && !tooltip.isEmpty()) {
+            // 창(모달)은 z 300 위에 그리고 그 안의 아이템은 더 앞에 그려지므로, 툴팁을 그보다 앞으로 꺼낸다
+            g.pose().pushPose();
+            g.pose().translate(0, 0, 600);
             g.renderComponentTooltip(font, tooltip, mx, my);
+            g.pose().popPose();
         }
     }
 
@@ -686,6 +690,11 @@ public final class EditorScreen extends Screen {
         }
         if (st.hasProperty(BlockStateProperties.SLAB_TYPE)) {
             s.face = st.getValue(BlockStateProperties.SLAB_TYPE) == SlabType.TOP ? Direction.DOWN : Direction.UP;
+        }
+        if (st.hasProperty(BlockStateProperties.HANGING)) {
+            // 매단 랜턴을 집으면 밑면에 붙이기로
+            s.face = st.getValue(BlockStateProperties.HANGING) ? Direction.DOWN : Direction.UP;
+            s.lookV = 0;
         }
         if (st.hasProperty(BlockStateProperties.FACING)) {
             Direction d = st.getValue(BlockStateProperties.FACING);

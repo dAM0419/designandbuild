@@ -33,7 +33,7 @@ import java.util.Map;
  * 철거는 위층부터, 나머지는 아래층부터 진행한다. 비교는 클라이언트가 가진 월드 블록으로 조금씩 굴려 가며 한다.
  */
 public final class Projection {
-    public static final byte UNKNOWN = 0, DONE = 1, PLACE = 2, WRONG = 3, DEMOLISH = 4, FILL = 5, CONVERT = 6;
+    public static final byte UNKNOWN = 0, DONE = 1, PLACE = 2, WRONG = 3, DEMOLISH = 4, FILL = 5, CONVERT = 6, WAIT = 7;
     public static final int STAGE_DEMOLISH = 0, STAGE_FLOOR = 1, STAGE_PATH = 2, STAGE_STRUCTURES = 3;
     public static final int NO_LAYER = Integer.MIN_VALUE;
 
@@ -521,7 +521,31 @@ public final class Projection {
         if (t.isAir()) return DONE;
         if (StateRules.sameBlockWrongState(world, t)) return WRONG;
         if (StateRules.conversion(level, world, t) != null) return CONVERT;
+        if (waitingForSupport(level, i, x, y, z)) return WAIT;
         return PLACE;
+    }
+
+    /**
+     * 지금은 그 자리에서 버틸 수 없는데(매단 랜턴의 천장, 벽 횃불의 벽 등) 받침이 될 이웃이 아직 안 지은 설계 칸이면,
+     * 받침을 지은 뒤에 차례가 오도록 기다린다 (투영에 보이지 않고 망치로 겨눠지지 않는다, 남은 칸으로는 센다).
+     * 이웃이 설계 칸이 아니면 기다려도 소용없으므로 그대로 놓을 칸으로 보여 준다 (망치가 받침이 없다고 알린다).
+     */
+    private boolean waitingForSupport(ClientLevel level, int i, int x, int y, int z) {
+        BlockState t = target[i];
+        BlockPos p = new BlockPos(x, y, z);
+        try {
+            if (t.canSurvive(level, p)) return false;
+        } catch (Exception e) {
+            return false;
+        }
+        BlockPos.MutableBlockPos q = new BlockPos.MutableBlockPos();
+        for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+            q.setWithOffset(p, d);
+            int j = index.get(q.asLong());
+            if (j < 0 || target[j].isAir()) continue;
+            if (!StateRules.matches(level.getBlockState(q), target[j])) return true;
+        }
+        return false;
     }
 
     private void setStatus(int i, byte ns) {
@@ -764,7 +788,7 @@ public final class Projection {
     boolean inView(int i) {
         if (cur >= stageCount || curLayer == NO_LAYER) return false;
         byte st = status[i];
-        if (st == DONE || st == UNKNOWN) return false;
+        if (st == DONE || st == UNKNOWN || st == WAIT) return false;
         boolean dem = st == DEMOLISH || st == FILL;
         if (cur == STAGE_DEMOLISH) {
             if (!dem) return false;
