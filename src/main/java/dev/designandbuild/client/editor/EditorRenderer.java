@@ -196,6 +196,7 @@ public final class EditorRenderer implements AutoCloseable {
                 entries.put(key, e);
             }
             e.closeFull();
+            e.clsStamp = Integer.MIN_VALUE; // 단면 예외 칸이 생겼을 수 있다: 분류를 다시
             int ox = SectionPos.x(key) << 4, oy = SectionPos.y(key) << 4, oz = SectionPos.z(key) << 4;
             e.full = mesher.build(s.world, new SectionIter(ox, oy, oz, null), ox, oy, oz, 1.0F, false);
             e.fullEdges = edger.build(s.world, null, this::sectionExists, ox, oy, oz);
@@ -249,7 +250,10 @@ public final class EditorRenderer implements AutoCloseable {
         Box near = sec.inflate(1, 1);
         boolean touches = false;
         for (Box r : regionsCache) {
-            if (r.contains(ox, oy, oz) && r.contains(ox + 15, oy + 15, oz + 15)) return CutClass.FULL_CUT;
+            // 통째로 잘린 구역이라도 단면 예외 칸이 있으면 경계 구역처럼 그 칸만 따로 굽는다
+            if (r.contains(ox, oy, oz) && r.contains(ox + 15, oy + 15, oz + 15)) {
+                return s.hasCutExempt(key) ? CutClass.MIXED : CutClass.FULL_CUT;
+            }
             if (near.intersects(r)) touches = true;
         }
         return touches ? CutClass.MIXED : CutClass.UNCUT;

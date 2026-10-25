@@ -249,6 +249,12 @@ public final class ViewportRenderer {
                     pl.oz() + pl.shape().sz() - 1);
             box(solidLines, ps, b, tx, ty, tz, pl.valid() ? 0xFFFFFFFF : Ui.DEMOLISH);
         }
+        // 단면 예외 칸 (단면을 켠 뒤 놓아서 잘린 쪽인데도 보이는 칸): 옅은 청록 테두리
+        int exemptColor = Ui.withAlpha(Ui.ACCENT, 110);
+        s.forEachShownExempt(4096, p -> {
+            int x = BlockPos.getX(p), y = BlockPos.getY(p), z = BlockPos.getZ(p);
+            box(solidLines, ps, new Box(x, y, z, x, y, z), tx, ty, tz, exemptColor);
+        });
         if (screen.isStroking() && screen.hover != null) {
             BlockPos p = screen.hover.pos();
             box(solidLines, ps, new Box(p.getX(), p.getY(), p.getZ(), p.getX(), p.getY(), p.getZ()), tx, ty, tz, Ui.ACCENT);

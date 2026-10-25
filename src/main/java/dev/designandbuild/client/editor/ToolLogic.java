@@ -251,6 +251,7 @@ public final class ToolLogic {
         long[] pos = cells.keySet().toLongArray();
         BlockState[] states = new BlockState[pos.length];
         for (int i = 0; i < pos.length; i++) states[i] = cells.get(pos[i]);
+        s.exemptFromCut(pos, states); // 단면을 켠 뒤 놓은 칸은 잘린 쪽이어도 보이게
         if (structureLayer(s)) {
             if (s.selected == 0) {
                 if (s.isAwaitingCreate()) s.queueForCreated(group, pos, states);
@@ -473,6 +474,7 @@ public final class ToolLogic {
             }
             return;
         }
+        s.exemptFromCut(pos, states); // 단면을 켠 뒤 놓은 조각은 잘린 쪽이어도 보이게
         // 배치한 구조물은 자동으로 선택하지 않는다 (이어서 지우기를 하면 그 구조물의 공기 지정이 되어 버리므로)
         s.send(new Requests.StructCreate(0, name, source, p.shape().mount(),
                 rotationOf(p.shape().rotation()), p.shape().mirror() ? Mirror.FRONT_BACK : Mirror.NONE,

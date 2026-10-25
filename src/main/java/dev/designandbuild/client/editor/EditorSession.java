@@ -237,7 +237,13 @@ public final class EditorSession {
 
     private static final Direction.Axis[] AXES = Direction.Axis.values();
 
+    /** 단면에 숨는 칸인가. 단면을 켠 뒤 직접 놓은 칸(단면 예외)은 숨기지 않는다. */
     public boolean isCut(int x, int y, int z) {
+        return isCut(x, y, z, true);
+    }
+
+    /** withExemptions = false 면 단면 예외를 무시한 원래 판정 (예외 표시용). */
+    public boolean isCut(int x, int y, int z, boolean withExemptions) {
         if (!cutActive) return false;
         boolean hidden = false;
         for (Direction.Axis ax : AXES) {
@@ -252,7 +258,58 @@ public final class EditorSession {
         }
         if (!hidden) return false;
         Box scope = cutScope();
-        return scope == null || scope.contains(x, y, z);
+        if (scope != null && !scope.contains(x, y, z)) return false;
+        return !withExemptions || !exempt(x, y, z);
+    }
+
+    // ---- 단면 예외 ----
+    // 단면을 켠 뒤 이 편집자가 직접조작·배치로 놓은 칸은 잘린 쪽에 있어도 보인다 (잘라 낸 방 안을 꾸밀 수 있게).
+    // 칸마다 놓은 블록을 기억하고, 지금 설계의 그 칸이 같은 블록일 때만 예외다: 되돌리기나 다른 사람의 변경으로
+    // 블록이 바뀌면 자동으로 풀린다. 단면을 끄면 비운다.
+
+    private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<net.minecraft.world.level.block.Block> cutExempt =
+            new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+    /** 구역(SectionPos)별 예외 칸 수 (통째로 잘린 구역도 예외 칸은 그리게). */
+    private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap exemptBySection = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+
+    /** 놓으려고 보낸 칸을 단면 예외로 기억한다 (단면이 켜져 있을 때만, 공기 칸 제외). */
+    public void exemptFromCut(long[] pos, BlockState[] states) {
+        if (!cutActive) return;
+        for (int i = 0; i < pos.length; i++) {
+            if (states[i] == null || states[i].isAir()) continue;
+            long p = pos[i];
+            if (cutExempt.put(p, states[i].getBlock()) == null) exemptBySection.addTo(sectionOf(p), 1);
+        }
+    }
+
+    /** 이 구역에 단면 예외 칸이 있는가. */
+    public boolean hasCutExempt(long section) {
+        return !exemptBySection.isEmpty() && exemptBySection.get(section) > 0;
+    }
+
+    private boolean exempt(int x, int y, int z) {
+        if (cutExempt.isEmpty()) return false;
+        long p = BlockPos.asLong(x, y, z);
+        net.minecraft.world.level.block.Block b = cutExempt.get(p);
+        if (b == null) return false;
+        Resolved r = model.resolved(p);
+        return r != null && !r.isAir() && r.state().getBlock() == b;
+    }
+
+    /** 단면 예외로 보이고 있는 칸 (표시용, 최대 limit 개). */
+    public void forEachShownExempt(int limit, java.util.function.LongConsumer out) {
+        if (!cutActive || cutExempt.isEmpty()) return;
+        int n = 0;
+        for (long p : cutExempt.keySet()) {
+            int x = BlockPos.getX(p), y = BlockPos.getY(p), z = BlockPos.getZ(p);
+            if (!exempt(x, y, z) || !isCut(x, y, z, false)) continue;
+            out.accept(p);
+            if (++n >= limit) return;
+        }
+    }
+
+    private static long sectionOf(long p) {
+        return net.minecraft.core.SectionPos.asLong(BlockPos.getX(p) >> 4, BlockPos.getY(p) >> 4, BlockPos.getZ(p) >> 4);
     }
 
     /** 단면 범위: 선택 구조물 볼륨, 없으면 영역 전체 (그려지는 높이 안). */
@@ -343,6 +400,10 @@ public final class EditorSession {
 
     /** 자르기 설정이 바뀌었으면 경계 섹션을 다시 굽게 한다. 매 프레임 부른다. */
     public void checkCutChanged() {
+        if (!cutActive && !cutExempt.isEmpty()) {
+            cutExempt.clear();
+            exemptBySection.clear();
+        }
         List<Object> key = cutActive
                 ? java.util.Arrays.asList(selected, bubble, cutOnlyLayer, cutOn[0], cutOn[1], cutOn[2], cutAt[0], cutAt[1], cutAt[2],
                         cutSign(Direction.Axis.X), cutSign(Direction.Axis.Z))
