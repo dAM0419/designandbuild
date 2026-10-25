@@ -158,13 +158,25 @@ public final class EditorSession {
         return snapshot.get(x, y, z);
     }
 
-    /** 숨기는 쪽: 축의 + 방향이면 1, - 방향이면 -1. Y는 언제나 위, X·Z는 카메라가 있는 쪽. */
+    /** 직전에 정한 X·Z 숨김 방향 (카메라가 단면 축과 수직이라 정할 수 없을 때 유지). */
+    private int lastCutSignX = 1, lastCutSignZ = -1;
+
+    /**
+     * 숨기는 쪽: 축의 + 방향이면 1, - 방향이면 -1. Y는 언제나 위, X·Z는 카메라가 있는 쪽.
+     * 정면으로 볼 때처럼 카메라가 그 축과 수직이면 어느 쪽인지 알 수 없으므로 직전 값을 쓴다.
+     */
     public int cutSign() {
-        int r = camera.rotation; // 0 북동, 1 남동, 2 남서, 3 북서
+        org.joml.Vector3f c = camera.toCamera();
         return switch (cutAxis) {
             case Y -> 1;
-            case X -> (r == 0 || r == 1) ? 1 : -1;
-            case Z -> (r == 1 || r == 2) ? 1 : -1;
+            case X -> {
+                if (Math.abs(c.x) > 0.05F) lastCutSignX = c.x > 0 ? 1 : -1;
+                yield lastCutSignX;
+            }
+            case Z -> {
+                if (Math.abs(c.z) > 0.05F) lastCutSignZ = c.z > 0 ? 1 : -1;
+                yield lastCutSignZ;
+            }
         };
     }
 

@@ -84,7 +84,7 @@ public final class TopBar extends UiPart {
         bx -= 22;
         drawCompass(g, bx + 8, y + 8, s);
         if (Ui.inside(mx, my, bx, y, 16, 16)) {
-            screen.tooltip = List.of(Component.translatable("designandbuild.editor.view_" + s.camera.rotation));
+            screen.tooltip = List.of(Component.translatable("designandbuild.editor.view_name", s.camera.viewName()));
         }
     }
 

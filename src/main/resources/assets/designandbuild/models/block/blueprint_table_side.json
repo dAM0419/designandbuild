@@ -1,12 +1,12 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "board": "minecraft:block/birch_planks",
-    "frame": "minecraft:block/stripped_birch_log",
-    "frame_end": "minecraft:block/stripped_birch_log_top",
+    "board": "minecraft:block/spruce_planks",
+    "frame": "minecraft:block/stripped_spruce_log",
+    "frame_end": "minecraft:block/stripped_spruce_log_top",
     "knob": "minecraft:block/black_concrete",
     "paper": "designandbuild:block/blueprint_paper",
-    "particle": "minecraft:block/birch_planks"
+    "particle": "minecraft:block/spruce_planks"
   },
   "elements": [
     {
@@ -85,7 +85,7 @@
       ],
       "to": [
         4,
-        11.5,
+        17.5,
         5.5
       ],
       "faces": {
@@ -95,7 +95,7 @@
             0,
             0,
             2,
-            10.0
+            16
           ]
         },
         "south": {
@@ -104,7 +104,7 @@
             0,
             0,
             2,
-            10.0
+            16
           ]
         },
         "east": {
@@ -113,7 +113,7 @@
             0,
             0,
             2.0,
-            10.0
+            16
           ]
         },
         "west": {
@@ -122,7 +122,7 @@
             0,
             0,
             2.0,
-            10.0
+            16
           ]
         },
         "up": {
@@ -153,7 +153,7 @@
       ],
       "to": [
         4,
-        14.5,
+        20.5,
         12.5
       ],
       "faces": {
@@ -163,7 +163,7 @@
             0,
             0,
             2,
-            13.0
+            16
           ]
         },
         "south": {
@@ -172,7 +172,7 @@
             0,
             0,
             2,
-            13.0
+            16
           ]
         },
         "east": {
@@ -181,7 +181,7 @@
             0,
             0,
             2.0,
-            13.0
+            16
           ]
         },
         "west": {
@@ -190,7 +190,7 @@
             0,
             0,
             2.0,
-            13.0
+            16
           ]
         },
         "up": {
@@ -216,12 +216,12 @@
     {
       "from": [
         2,
-        6.5,
+        9,
         5.5
       ],
       "to": [
         4,
-        8,
+        10.5,
         10.5
       ],
       "faces": {

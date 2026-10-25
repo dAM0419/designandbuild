@@ -64,6 +64,7 @@ public final class EditorScreen extends Screen {
     public final PaletteBar paletteBar;
     public final SidePanel sidePanel;
     public final LayerSlider layerSlider;
+    public final dev.designandbuild.client.editor.ui.ViewCube viewCube;
     private final List<UiPart> parts = new ArrayList<>();
 
     @Nullable
@@ -93,14 +94,17 @@ public final class EditorScreen extends Screen {
     private boolean stroking;
     private int strokeGroup;
     private final LongOpenHashSet strokeDone = new LongOpenHashSet();
-    private int strokeY;
+    /** 연속 칠하기의 기준: 첫 클릭 칸과 면, 고정 평면 축 (내려다보면 Y, 정면이면 X·Z). */
+    private BlockPos strokePos = BlockPos.ZERO;
     private Direction strokeFace = Direction.UP;
+    private Direction.Axis strokeAxis = Direction.Axis.Y;
     private long armedKey = Long.MIN_VALUE;
     public boolean moving;
     public int moveDX, moveDY, moveDZ;
     @Nullable
     private Vec3 moveStart;
-    private double movePlaneY;
+    private double movePlane;
+    private Direction.Axis moveAxis = Direction.Axis.Y;
     @Nullable
     public LibraryEntry libraryDrag;
     private int[] cycleIds = new int[0];
@@ -122,12 +126,14 @@ public final class EditorScreen extends Screen {
         this.paletteBar = new PaletteBar(this);
         this.sidePanel = new SidePanel(this);
         this.layerSlider = new LayerSlider(this);
+        this.viewCube = new dev.designandbuild.client.editor.ui.ViewCube(this);
         parts.add(topBar);
         parts.add(toolBar);
         parts.add(optionBar);
         parts.add(paletteBar);
         parts.add(sidePanel);
         parts.add(layerSlider);
+        parts.add(viewCube);
     }
 
     public EditorSession session() {
@@ -204,6 +210,8 @@ public final class EditorScreen extends Screen {
         int palY = H - bottomH - PALETTE_H - 2;
         paletteBar.setBounds(palX, palY, Math.min(palW, vpW), PALETTE_H);
         layerSlider.setBounds(vpX + vpW - 30, vpY + 26, 26, palY - vpY - 34);
+        // 시점 큐브: 뷰포트 오른쪽 위, 층 슬라이더 왼쪽
+        viewCube.setBounds(vpX + vpW - 34 - 64, vpY + 4, 64, 84);
         s.camera.setViewport(W, H);
         if (mc.getWindow() == null) return;
     }
@@ -300,10 +308,18 @@ public final class EditorScreen extends Screen {
     /** 드래그 중: 첫 클릭 높이의 평면에 고정한 커서. */
     @Nullable
     private EditorSession.Hit planeHit(double mx, double my) {
-        double planeY = strokeFace == Direction.UP ? strokeY + 1 : strokeFace == Direction.DOWN ? strokeY : strokeY + 0.5;
-        Vec3 p = s.camera.groundPoint(mx, my, planeY);
+        Direction.Axis ax = strokeAxis;
+        int c = strokePos.get(ax);
+        // 첫 클릭 면이 이 축을 향하면 그 면 위, 아니면 칸 가운데를 지나는 평면
+        double plane = strokeFace.getAxis() == ax
+                ? c + (strokeFace.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1 : 0) : c + 0.5;
+        Vec3 p = s.camera.planePoint(mx, my, ax, plane);
         if (p == null) return null;
-        BlockPos pos = new BlockPos(Mth.floor(p.x), strokeY, Mth.floor(p.z));
+        BlockPos pos = switch (ax) {
+            case X -> new BlockPos(c, Mth.floor(p.y), Mth.floor(p.z));
+            case Y -> new BlockPos(Mth.floor(p.x), c, Mth.floor(p.z));
+            case Z -> new BlockPos(Mth.floor(p.x), Mth.floor(p.y), c);
+        };
         return new EditorSession.Hit(pos, strokeFace, p);
     }
 
@@ -542,8 +558,9 @@ public final class EditorScreen extends Screen {
                 stroking = true;
                 strokeGroup = dev.designandbuild.client.ClientStore.nextGroup();
                 strokeDone.clear();
-                strokeY = h.pos().getY();
+                strokePos = h.pos();
                 strokeFace = h.face();
+                strokeAxis = s.camera.planeAxis();
                 strokeAt(h);
             }
             case PLACE -> {
@@ -614,8 +631,11 @@ public final class EditorScreen extends Screen {
     private void beginMove(EditorSession.Hit h) {
         moving = true;
         moveDX = moveDY = moveDZ = 0;
-        movePlaneY = h.face() == Direction.UP ? h.pos().getY() + 1 : h.pos().getY() + 0.5;
-        moveStart = s.camera.groundPoint(mouseX, mouseY, movePlaneY);
+        moveAxis = s.camera.planeAxis();
+        int c = h.pos().get(moveAxis);
+        movePlane = h.face().getAxis() == moveAxis
+                ? c + (h.face().getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1 : 0) : c + 0.5;
+        moveStart = s.camera.planePoint(mouseX, mouseY, moveAxis, movePlane);
     }
 
     private void eyedropper(EditorSession.Hit h) {
@@ -724,10 +744,12 @@ public final class EditorScreen extends Screen {
             return true;
         }
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && moving && moveStart != null) {
-            Vec3 now = s.camera.groundPoint(mx, my, movePlaneY);
+            Vec3 now = s.camera.planePoint(mx, my, moveAxis, movePlane);
             if (now != null) {
-                moveDX = (int) Math.round(now.x - moveStart.x);
-                moveDZ = (int) Math.round(now.z - moveStart.z);
+                // 평면 안의 두 축으로 옮긴다 (정면에서 보면 위아래로도). 나머지 축은 PgUp/PgDn 과 같이 따로
+                if (moveAxis != Direction.Axis.X) moveDX = (int) Math.round(now.x - moveStart.x);
+                if (moveAxis != Direction.Axis.Y) moveDY = (int) Math.round(now.y - moveStart.y);
+                if (moveAxis != Direction.Axis.Z) moveDZ = (int) Math.round(now.z - moveStart.z);
             }
             return true;
         }

@@ -18,7 +18,8 @@
           "condition": "minecraft:block_state_property",
           "block": "designandbuild:blueprint_table",
           "properties": {
-            "part": "main"
+            "part": "main",
+            "upper": "false"
           }
         }
       ]
