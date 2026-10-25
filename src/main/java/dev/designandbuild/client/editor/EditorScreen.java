@@ -207,7 +207,12 @@ public final class EditorScreen extends Screen {
         paletteBar.setBounds(palX, palY, Math.min(palW, vpW), PALETTE_H);
         layerSlider.setBounds(vpX + vpW - 30, vpY + 26, 26, palY - vpY - 34);
         // 시점 큐브: 뷰포트 오른쪽 위, 층 슬라이더 왼쪽
-        viewCube.setBounds(vpX + vpW - 34 - 64, vpY + 4, 64, 84);
+        int cubeRight = vpX + vpW - 34;
+        // JEI 로 블록을 고르는 중이면 오른쪽에 JEI 목록과 안내 패널이 열리므로 그 왼쪽으로 비켜 선다
+        if (modal instanceof BlockPicker bp && bp.hidesEditorUi()) {
+            cubeRight = Math.min(cubeRight, BlockPicker.jeiPanelLeft(W) - 6);
+        }
+        viewCube.setBounds(cubeRight - 64, vpY + 4, 64, 84);
         s.camera.setViewport(W, H);
         if (mc.getWindow() == null) return;
     }

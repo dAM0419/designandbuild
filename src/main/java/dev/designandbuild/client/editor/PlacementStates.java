@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
+import net.minecraft.world.level.block.state.properties.BellAttachType;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
@@ -119,6 +120,18 @@ public final class PlacementStates {
         if (s.hasProperty(BlockStateProperties.ATTACH_FACE)) {
             s = s.setValue(BlockStateProperties.ATTACH_FACE,
                     face == Direction.UP ? AttachFace.FLOOR : face == Direction.DOWN ? AttachFace.CEILING : AttachFace.WALL);
+        }
+        // 매다는 블록 (랜턴·맹그로브 번식체): 블록 밑면을 누르거나 위를 보고 놓으면 매단 것 (바닐라는 받침이 있어야 정해 준다)
+        boolean hang = face == Direction.DOWN || look == Direction.UP;
+        if (s.hasProperty(BlockStateProperties.HANGING)) s = s.setValue(BlockStateProperties.HANGING, hang);
+        // 종: 바닥 / 천장 / 벽
+        if (s.hasProperty(BlockStateProperties.BELL_ATTACHMENT)) {
+            s = s.setValue(BlockStateProperties.BELL_ATTACHMENT, face == Direction.UP ? BellAttachType.FLOOR
+                    : face == Direction.DOWN ? BellAttachType.CEILING : BellAttachType.SINGLE_WALL);
+        }
+        // 뾰족한 점적석: 밑면에 붙이면 아래로 (종유석)
+        if (s.hasProperty(BlockStateProperties.VERTICAL_DIRECTION)) {
+            s = s.setValue(BlockStateProperties.VERTICAL_DIRECTION, hang ? Direction.DOWN : Direction.UP);
         }
         return s;
     }

@@ -3,6 +3,7 @@ package dev.designandbuild.core;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -40,10 +41,38 @@ public final class Stages {
         return kind != STRUCTURE || r.owner() == structureId;
     }
 
-    /** 층 보기 조건. 2칸 블록은 반쪽이 이 층에 걸리면 함께 보인다. */
+    /**
+     * 위에 매달려 받침이 위 칸에 있는 블록: 매단 랜턴·맹그로브 번식체, 천장 종, 아래로 자라는 점적석,
+     * 천장 버튼·레버, 천장 매다는 간판, 포자 꽃, 매달린 뿌리, 늘어진 덩굴·발광 열매 덩굴.
+     */
+    public static boolean hangsFromAbove(BlockState s) {
+        Block b = s.getBlock();
+        if (s.hasProperty(BlockStateProperties.HANGING) && s.getValue(BlockStateProperties.HANGING)) return true;
+        if (s.hasProperty(BlockStateProperties.BELL_ATTACHMENT)
+                && s.getValue(BlockStateProperties.BELL_ATTACHMENT) == net.minecraft.world.level.block.state.properties.BellAttachType.CEILING) return true;
+        if (b instanceof net.minecraft.world.level.block.PointedDripstoneBlock && s.hasProperty(BlockStateProperties.VERTICAL_DIRECTION)
+                && s.getValue(BlockStateProperties.VERTICAL_DIRECTION) == Direction.DOWN) return true;
+        if (s.hasProperty(BlockStateProperties.ATTACH_FACE)
+                && s.getValue(BlockStateProperties.ATTACH_FACE) == net.minecraft.world.level.block.state.properties.AttachFace.CEILING) return true;
+        return b instanceof net.minecraft.world.level.block.CeilingHangingSignBlock
+                || b instanceof net.minecraft.world.level.block.SporeBlossomBlock
+                || b instanceof net.minecraft.world.level.block.HangingRootsBlock
+                || b instanceof net.minecraft.world.level.block.WeepingVinesBlock
+                || b instanceof net.minecraft.world.level.block.WeepingVinesPlantBlock
+                || b instanceof net.minecraft.world.level.block.CaveVinesBlock
+                || b instanceof net.minecraft.world.level.block.CaveVinesPlantBlock;
+    }
+
+    /** 설치 단계에서 이 블록을 놓는 층: 받침이 위에 있는 블록은 받침 층(한 칸 위)에서 놓는다. */
+    public static int buildLayerY(BlockState s, int y) {
+        return hangsFromAbove(s) ? y + 1 : y;
+    }
+
+    /** 층 보기 조건. 2칸 블록은 반쪽이 이 층에 걸리면 함께 보인다. 설치 단계에서 매다는 블록은 받침 층에 보인다. */
     public static boolean layerOk(BlockState target, int y, int mode, int layerY, boolean topDown) {
         if (mode == LAYER_NONE) return false;
         if (mode == LAYER_ALL) return true;
+        if (!topDown) y = buildLayerY(target, y);
         if (layerOk(y, mode, layerY, topDown)) return true;
         if (target.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)) {
             boolean upper = target.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER;

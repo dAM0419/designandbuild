@@ -398,6 +398,14 @@ public final class Projection {
         if (cursor >= n) cursor = 0;
     }
 
+    /**
+     * 설치 단계에서 이 칸이 속하는 층. 받침이 위에 있는 블록(매단 랜턴 등)은 받침 층에서 놓는다
+     * — 아래층부터 지으면 받침이 아직 없어 놓을 수 없고, 그 칸 때문에 층이 끝나지 않기 때문이다.
+     */
+    private int layerY(int i) {
+        return dev.designandbuild.core.Stages.buildLayerY(target[i], BlockPos.getY(pos[i]));
+    }
+
     /** 칸 하나를 개수에 더하거나(1) 뺀다(-1). {@link #recount} 와 같은 규칙. */
     private void countCell(int i, int d) {
         int s = stage[i];
@@ -409,8 +417,9 @@ public final class Projection {
                 unknownBy[s] += d;
             } else if (st != DONE) {
                 remaining[s] += d;
-                layerRemaining[s].addTo(y, d);
-                if (layerRemaining[s].get(y) <= 0) layerRemaining[s].remove(y);
+                int ly = layerY(i);
+                layerRemaining[s].addTo(ly, d);
+                if (layerRemaining[s].get(ly) <= 0) layerRemaining[s].remove(ly);
             }
         }
         if (st == DEMOLISH || st == FILL) {
@@ -486,7 +495,7 @@ public final class Projection {
                     unknownBy[s]++;
                 } else if (st != DONE) {
                     remaining[s]++;
-                    layerRemaining[s].addTo(y, 1);
+                    layerRemaining[s].addTo(layerY(i), 1);
                 }
             }
             if (st == DEMOLISH || st == FILL) {
@@ -528,8 +537,9 @@ public final class Projection {
             if (was != is) {
                 int d = is ? 1 : -1;
                 remaining[s] += d;
-                layerRemaining[s].addTo(y, d);
-                if (layerRemaining[s].get(y) <= 0) layerRemaining[s].remove(y);
+                int ly = layerY(i);
+                layerRemaining[s].addTo(ly, d);
+                if (layerRemaining[s].get(ly) <= 0) layerRemaining[s].remove(ly);
             }
         }
         boolean wasDem = old == DEMOLISH || old == FILL, isDem = ns == DEMOLISH || ns == FILL;
@@ -762,9 +772,9 @@ public final class Projection {
             return false;
         }
         if (viewMode() == dev.designandbuild.core.Stages.LAYER_ALL) return true; // 단계 전체: 층 조건 없음
-        int y = BlockPos.getY(pos[i]);
-        boolean only = onlyLayer();
         boolean topDown = cur == STAGE_DEMOLISH;
+        int y = topDown ? BlockPos.getY(pos[i]) : layerY(i);
+        boolean only = onlyLayer();
         if (layerOk(y, only, topDown)) return true;
         // 2칸 블록은 반쪽이 이 층에 걸리면 함께 보인다
         BlockState t = target[i];
@@ -808,7 +818,7 @@ public final class Projection {
             if (stage[i] != cur) continue;
             byte st = status[i];
             if (st == DONE || st == WRONG) continue;
-            if (layerOnly && BlockPos.getY(pos[i]) != curLayer) continue;
+            if (layerOnly && layerY(i) != curLayer) continue;
             if (st == CONVERT) {
                 StateRules.Conversion c = StateRules.conversion(level, level.getBlockState(mp.set(pos[i])), target[i]);
                 if (c != null) for (int t = 0; t < toolUses.length; t++) toolUses[t] += c.uses()[t];

@@ -5,7 +5,7 @@
 
 > Design villages and large builds on a blueprint table in a quarter-view editor, then build them in the world step by step: demolition, floors, paths, then structures in your chosen order.
 
-현재 버전: **0.2.12** (개발 중, 공개 전)
+현재 버전: **0.2.13** (개발 중, 공개 전)
 
 ---
 

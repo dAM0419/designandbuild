@@ -179,7 +179,7 @@ public final class BlockPicker extends Modal {
             // JEI 목록은 오른쪽(평소 우측 패널 자리)에, 안내 패널은 그 바로 왼쪽 뷰포트 위에
             w = JEI_PANEL_W;
             h = JEI_PANEL_H;
-            x = screen.width - JEI_LIST_W - w - 6;
+            x = jeiPanelLeft(screen.width);
             y = EditorScreen.TOP + 26;
             return;
         }
@@ -199,6 +199,11 @@ public final class BlockPicker extends Modal {
     public int[] jeiArea() {
         if (!jeiMode) return null;
         return new int[]{0, 0, screen.width - JEI_LIST_W, screen.height};
+    }
+
+    /** JEI 모드 안내 패널의 왼쪽 끝 (시점 큐브 등이 그 왼쪽으로 비켜 선다). */
+    public static int jeiPanelLeft(int screenWidth) {
+        return screenWidth - JEI_LIST_W - JEI_PANEL_W - 6;
     }
 
     public boolean isJeiMode() {
