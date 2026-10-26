@@ -100,6 +100,11 @@ public final class EditorScreen extends Screen {
     private BlockPos strokePos = BlockPos.ZERO;
     private Direction strokeFace = Direction.UP;
     private Direction.Axis strokeAxis = Direction.Axis.Y;
+    /** 드래그를 시작한 마우스 위치와 첫 칸. 여기서 거의 움직이지 않았으면 첫 칸만 쓴다 (한 번 누름 = 한 번 적용). */
+    private double strokeStartX, strokeStartY;
+    private boolean strokeMoved;
+    @Nullable
+    private EditorSession.Hit strokeFirst;
     private long armedKey = Long.MIN_VALUE;
     public boolean moving;
     public int moveDX, moveDY, moveDZ;
@@ -304,12 +309,28 @@ public final class EditorScreen extends Screen {
         }
         if (moving) return;
         if (stroking) {
+            if (!strokeMoved && Math.abs(mx - strokeStartX) <= 2 && Math.abs(my - strokeStartY) <= 2) {
+                hover = strokeFirst;
+                return;
+            }
+            strokeMoved = true;
             EditorSession.Hit h = planeHit(mx, my);
             hover = h;
             if (h != null) strokeAt(h);
             return;
         }
         hover = s.pick(mx, my);
+    }
+
+    /**
+     * 드래그 평면의 축: 누른 면이 카메라 쪽을 충분히 향하면 그 면의 평면(벽면을 누르면 벽면을 따라 칠한다).
+     * 면이 카메라와 거의 나란하면(정면 시점에서 윗면 등) 평면 위 위치가 불안정하므로 화면을 마주 보는 평면.
+     * 누른 면의 평면을 쓰면 첫 프레임의 커서 칸이 누른 칸과 같아, 한 번 누름이 두 번 적용되지 않는다.
+     */
+    private Direction.Axis strokeAxisFor(Direction face) {
+        org.joml.Vector3f c = s.camera.toCamera();
+        float facing = Math.abs(face.getStepX() * c.x + face.getStepY() * c.y + face.getStepZ() * c.z);
+        return facing >= 0.3F ? face.getAxis() : s.camera.planeAxis();
     }
 
     /** 드래그 중: 첫 클릭 높이의 평면에 고정한 커서. */
@@ -576,7 +597,11 @@ public final class EditorScreen extends Screen {
                 strokeDone.clear();
                 strokePos = h.pos();
                 strokeFace = h.face();
-                strokeAxis = s.camera.planeAxis();
+                strokeAxis = strokeAxisFor(h.face());
+                strokeStartX = mx;
+                strokeStartY = my;
+                strokeMoved = false;
+                strokeFirst = h;
                 strokeAt(h);
             }
             case PLACE -> {

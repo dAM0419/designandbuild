@@ -5,7 +5,7 @@
 
 > Design villages and large builds on a blueprint table in a quarter-view editor, then build them in the world step by step: demolition, floors, paths, then structures in your chosen order.
 
-현재 버전: **0.2.18** (개발 중, 공개 전)
+현재 버전: **0.2.19** (개발 중, 공개 전)
 
 ---
 
@@ -83,7 +83,7 @@ gradlew.bat build        # Windows
 | | `T` | 태그 색 보기 |
 | | `G` | 블록 테두리 |
 | | `Tab` | 우측 패널 접기·펴기 |
-| 편집 | 좌클릭 / 좌드래그 | 적용 / 평면 고정 연속 적용 |
+| 편집 | 좌클릭 / 좌드래그 | 적용 / 평면 고정 연속 적용 (누른 면을 따라 칠함) |
 | | `Alt+휠` | 범위 크기 일괄 조절 |
 | | `Ctrl+휠` | 팔레트 칸 순환 |
 | | 휠 클릭 / `Shift+휠 클릭` | 스포이드 / 집은 블록을 팔레트에 |
