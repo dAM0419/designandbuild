@@ -109,6 +109,7 @@ public final class ToolLogic {
         long volume = b.volume();
         if (volume > 4_000_000L) return new long[0];
         net.minecraft.world.level.block.Block slabMat = null;
+        java.util.Set<net.minecraft.world.level.block.Block> replaceFilter = s.op == EditorSession.Op.REPLACE ? s.replaceFilter() : null;
         if (s.op == EditorSession.Op.FILL) {
             for (ItemStack m : s.materials) {
                 if (m.getItem() instanceof net.minecraft.world.item.BlockItem bi
@@ -137,7 +138,7 @@ public final class ToolLogic {
                             continue;
                         }
                     }
-                    if (s.op == EditorSession.Op.REPLACE && cur.isAir()) continue;
+                    if (s.op == EditorSession.Op.REPLACE && !EditorSession.replaceable(cur, replaceFilter)) continue;
                     // 지형 지우기: 이미 비어 있고 설계도 없는 칸은 건너뛴다 (쓸모없는 철거 기록이 쌓이지 않게)
                     if (s.op == EditorSession.Op.ERASE && !structureLayer && cur.isAir() && s.model.terrainAt(p) == null) continue;
                     out.add(p);
@@ -349,6 +350,7 @@ public final class ToolLogic {
      * 윗면 설치는 아랫면을 가리킬 수 없어 놓을 수 없다.
      */
     public static Placement placement(EditorSession s, TemplateData t, EditorSession.Hit hit) {
+        java.util.Set<net.minecraft.world.level.block.Block> replaceFilter = s.placeOp == EditorSession.Op.REPLACE ? s.replaceFilter() : null;
         int rot = s.placeRotation;
         Direction face = hit.face();
         String error = null;
@@ -414,7 +416,7 @@ public final class ToolLogic {
                 BlockState cur = s.blockAt(x, y, z, false);
                 boolean ok = switch (op) {
                     case FILL -> (cur.isAir() || cur.canBeReplaced()) && s.editable(pos[i], true);
-                    case REPLACE -> !cur.isAir() && s.editable(pos[i], true);
+                    case REPLACE -> EditorSession.replaceable(cur, replaceFilter) && s.editable(pos[i], true);
                     default -> !cur.isAir() && s.editable(pos[i], eraseIntoStructure);   // 지우기
                 };
                 if (!ok) continue;

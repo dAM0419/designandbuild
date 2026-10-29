@@ -69,6 +69,38 @@ public final class EditorSession {
     public boolean ratioLock;
     public int percent = 100;
     public final ItemStack[] materials = {ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY};
+    /** 대체 대상 (직접조작·배치 공통). 모두 비어 있으면 모든 블록을 대체, 아니면 이 블록들만. */
+    public final ItemStack[] replaceTargets = {ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY};
+
+    /** 대체 대상 블록 (비어 있으면 null = 모든 블록). */
+    @Nullable
+    public java.util.Set<net.minecraft.world.level.block.Block> replaceFilter() {
+        java.util.Set<net.minecraft.world.level.block.Block> set = null;
+        for (ItemStack st : replaceTargets) {
+            net.minecraft.world.level.block.Block b = blockOf(st);
+            if (b == null) continue;
+            if (set == null) set = new java.util.HashSet<>(4);
+            set.add(b);
+        }
+        return set;
+    }
+
+    /** 대체할 칸인가: 비어 있지 않고, 대상을 정했으면 그 블록. */
+    public static boolean replaceable(BlockState cur, @Nullable java.util.Set<net.minecraft.world.level.block.Block> filter) {
+        return !cur.isAir() && (filter == null || filter.contains(cur.getBlock()));
+    }
+
+    /** 대상 칸의 아이템이 가리키는 블록 (블록 아이템, 액체 양동이). */
+    @Nullable
+    public static net.minecraft.world.level.block.Block blockOf(ItemStack st) {
+        if (st.isEmpty()) return null;
+        if (st.getItem() instanceof net.minecraft.world.item.BlockItem bi) return bi.getBlock();
+        if (st.getItem() instanceof net.minecraft.world.item.BucketItem) {
+            return net.neoforged.neoforge.fluids.FluidUtil.getFluidContained(st)
+                    .map(f -> f.getFluid().defaultFluidState().createLegacyBlock().getBlock()).orElse(null);
+        }
+        return null;
+    }
     public final int[] weights = {1, 1, 1};
     public DesignTag tag = DesignTag.FLOOR;
     /** 설치하는 가상 플레이어가 바라보는 수평 방향 / 위(1)·수평(0)·아래(-1). */

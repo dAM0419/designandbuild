@@ -159,6 +159,7 @@ public final class OptionBar extends UiPart {
             iconButton(opIcons[i], () -> s.op == op, () -> s.op = op, "designandbuild.op." + op.name().toLowerCase(), Integer.toString(i + 1));
         }
         sep();
+        if (s.op == EditorSession.Op.REPLACE) replaceTargets(s);
         EditorSession.Shape[] shapes = EditorSession.Shape.values();
         int[] shapeIcons = {Icons.BOX, Icons.CYLINDER, Icons.SPHERE};
         for (int i = 0; i < 3; i++) {
@@ -269,6 +270,42 @@ public final class OptionBar extends UiPart {
         }
     }
 
+    /** 대체 대상 칸 3개: 비어 있으면 모든 블록을 대체, 넣은 블록만 대체. 좌클릭 = 고르기, 우클릭 = 비우기. */
+    private void replaceTargets(EditorSession s) {
+        label(Component.translatable("designandbuild.replace.targets").getString(), Ui.DIM);
+        boolean any = false;
+        for (ItemStack st : s.replaceTargets) if (!st.isEmpty()) any = true;
+        boolean all = !any;
+        for (int i = 0; i < 3; i++) {
+            int idx = i;
+            items.add(new Item(18, (g, x, y, h) -> {
+                int sy = y + 2;
+                g.fill(x, sy, x + 18, sy + 18, 0xFF161B22);
+                Ui.border(g, x, sy, 18, 18, h ? 0xFF6A7584 : Ui.EDGE);
+                ItemStack st = s.replaceTargets[idx];
+                if (!st.isEmpty()) {
+                    g.renderItem(st, x + 1, sy + 1);
+                } else if (idx == 0) {
+                    Ui.icon(g, Icons.PLUS, x + 1, sy + 1, Ui.DIM);
+                }
+            }, b -> {
+                if (b == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+                    s.replaceTargets[idx] = ItemStack.EMPTY;
+                } else {
+                    screen.openPicker(new BlockPicker.Target(BlockPicker.Kind.REPLACE_TARGET, idx));
+                }
+            }, null, () -> {
+                List<Component> l = new ArrayList<>();
+                ItemStack st = s.replaceTargets[idx];
+                l.add(st.isEmpty() ? Component.translatable("designandbuild.replace.target_empty") : st.getHoverName());
+                l.add(Component.translatable("designandbuild.replace.tip").withStyle(x -> x.withColor(Ui.DIM & 0xFFFFFF)));
+                return l;
+            }));
+        }
+        if (all) label(Component.translatable("designandbuild.replace.all").getString(), Ui.DIM);
+        sep();
+    }
+
     private List<Component> materialTip(EditorSession s, int idx) {
         List<Component> l = new ArrayList<>();
         ItemStack st = s.materials[idx];
@@ -305,6 +342,7 @@ public final class OptionBar extends UiPart {
                     Integer.toString(i + 1));
         }
         sep();
+        if (s.placeOp == EditorSession.Op.REPLACE) replaceTargets(s);
         iconButton(Icons.ROTATE_R, () -> false, () -> s.placeRotation = (s.placeRotation + 1) & 3, "designandbuild.place.rotate", "R");
         iconButton(Icons.MIRROR, () -> s.placeMirror, () -> s.placeMirror = !s.placeMirror, "designandbuild.place.mirror", "F");
         sep();

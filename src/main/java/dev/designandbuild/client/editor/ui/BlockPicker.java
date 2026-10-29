@@ -36,7 +36,7 @@ import java.util.Set;
  * 설치할 수 있는 것(블록 아이템, 액체 양동이)만 보인다.
  */
 public final class BlockPicker extends Modal {
-    public enum Kind { PALETTE, MATERIAL }
+    public enum Kind { PALETTE, MATERIAL, REPLACE_TARGET }
 
     public record Target(Kind kind, int index) {}
 
@@ -221,9 +221,11 @@ public final class BlockPicker extends Modal {
     }
 
     private Component targetName() {
-        return target.kind() == Kind.PALETTE
-                ? Component.translatable("designandbuild.picker.for_palette", target.index() + 1)
-                : Component.translatable("designandbuild.picker.for_material", target.index() + 1);
+        return switch (target.kind()) {
+            case PALETTE -> Component.translatable("designandbuild.picker.for_palette", target.index() + 1);
+            case MATERIAL -> Component.translatable("designandbuild.picker.for_material", target.index() + 1);
+            case REPLACE_TARGET -> Component.translatable("designandbuild.picker.for_target", target.index() + 1);
+        };
     }
 
     // ------------------------------------------------------------------
@@ -390,6 +392,8 @@ public final class BlockPicker extends Modal {
                 s.paletteIndex = target.index();
                 s.materials[0] = st.copy();
             }
+        } else if (target.kind() == Kind.REPLACE_TARGET) {
+            s.replaceTargets[target.index()] = st;
         } else {
             int i = target.index();
             s.materials[i] = st;

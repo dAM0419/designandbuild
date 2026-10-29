@@ -462,7 +462,7 @@ public final class EditorScreen extends Screen {
             }
             // 커서·회전·기준·도면이 그대로면 다시 계산하지 않는다 (큰 조각은 칸 수만큼 조회가 든다)
             List<Object> k = java.util.Arrays.asList(t, h.pos().asLong(), h.face(), s.placeRotation, s.placeMirror,
-                    s.placeInto, s.placeOp, s.model.revision());
+                    s.placeInto, s.placeOp, s.model.revision(), materialKey());
             if (placement != null && k.equals(placementKey)) return;
             placementKey = k;
             placement = ToolLogic.placement(s, t, h);
@@ -511,6 +511,7 @@ public final class EditorScreen extends Screen {
         for (int i = 0; i < 3; i++) {
             h = h * 31 + ItemStack.hashItemAndComponents(s.materials[i]);
             h = h * 31 + s.weights[i];
+            h = h * 31 + ItemStack.hashItemAndComponents(s.replaceTargets[i]);
         }
         return h * 31 + s.percent;
     }
